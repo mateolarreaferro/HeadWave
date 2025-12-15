@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+brainflow
+numpy
+scipy
+python-osc
+jinja2
+pyserial
+opencv-python>=4.8.1.78
+mediapipe>=0.10.14
