@@ -12,59 +12,61 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      /* Minimal White & Black Theme - Professional & Clean */
+      /* Notion-inspired Warm & Friendly Theme */
       --bg-primary: #FFFFFF;
-      --bg-secondary: #FAFAFA;
-      --bg-tertiary: #F5F5F5;
+      --bg-secondary: #F7F6F3;
+      --bg-tertiary: #EFEEEB;
       --bg-elevated: #FFFFFF;
+      --bg-hover: #F1F0ED;
 
-      /* Accent colors - for visualizations */
-      --accent-blue: #2AA3FE;
-      --accent-green: #10B978;
-      --accent-purple: #B743C6;
-      --accent-orange: #F58633;
+      /* Accent colors - warm and approachable */
+      --accent-blue: #0F7EF3;
+      --accent-green: #00A461;
+      --accent-purple: #9B51E0;
+      --accent-orange: #FFA344;
+      --accent-red: #F97066;
 
-      /* Neutrals - grayscale inverted */
-      --neutral-900: #000000;
-      --neutral-800: #1A1A1A;
-      --neutral-700: #333333;
-      --neutral-600: #666666;
-      --neutral-500: #999999;
-      --neutral-400: #B3B3B3;
-      --neutral-300: #CCCCCC;
-      --neutral-200: #E0E0E0;
-      --neutral-100: #F5F5F5;
+      /* Warm neutrals - Notion style */
+      --neutral-900: #37352F;
+      --neutral-800: #37352F;
+      --neutral-700: #37352FE6;
+      --neutral-600: #37352FB3;
+      --neutral-500: #37352F80;
+      --neutral-400: #37352F59;
+      --neutral-300: #37352F40;
+      --neutral-200: #37352F1A;
+      --neutral-100: #37352F0D;
 
       /* Semantic colors */
-      --text-primary: #000000;
-      --text-secondary: #666666;
-      --text-tertiary: #999999;
-      --success: #000000;
-      --error: #000000;
-      --warning: #000000;
+      --text-primary: #37352F;
+      --text-secondary: #787774;
+      --text-tertiary: #9B9A97;
+      --success: #00A461;
+      --error: #E03E3E;
+      --warning: #FFA344;
 
-      /* Borders & shadows */
-      --border-light: #E0E0E0;
-      --border-medium: #CCCCCC;
-      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
-      --shadow-lg: 0 10px 24px rgba(0, 0, 0, 0.15);
-      --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.2);
+      /* Borders & shadows - softer */
+      --border-light: rgba(55, 53, 47, 0.09);
+      --border-medium: rgba(55, 53, 47, 0.16);
+      --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
+      --shadow-md: 0 2px 8px rgba(15, 15, 15, 0.08);
+      --shadow-lg: 0 4px 16px rgba(15, 15, 15, 0.10);
+      --shadow-xl: 0 8px 32px rgba(15, 15, 15, 0.12);
 
-      /* Radius */
-      --radius-sm: 4px;
-      --radius-md: 8px;
-      --radius-lg: 12px;
-      --radius-xl: 16px;
+      /* Radius - more rounded */
+      --radius-sm: 3px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --radius-xl: 12px;
       --radius-full: 9999px;
 
-      /* Spacing - Reduced for compact layout */
+      /* Spacing - more generous */
       --space-xs: 4px;
-      --space-sm: 6px;
-      --space-md: 10px;
-      --space-lg: 14px;
-      --space-xl: 18px;
-      --space-2xl: 24px;
+      --space-sm: 8px;
+      --space-md: 12px;
+      --space-lg: 16px;
+      --space-xl: 24px;
+      --space-2xl: 32px;
     }
 
     * {
@@ -113,30 +115,30 @@
     }
 
     .brand-logo {
-      width: 48px;
-      height: 48px;
+      width: 40px;
+      height: 40px;
       border-radius: var(--radius-md);
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-light);
+      background: linear-gradient(135deg, rgba(55, 53, 47, 0.08), rgba(55, 53, 47, 0.03));
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 700;
-      font-size: 20px;
+      font-weight: 600;
+      font-size: 18px;
       color: var(--text-primary);
+      border: 1px solid rgba(55, 53, 47, 0.08);
     }
 
     .brand-text h1 {
-      font-size: 24px;
-      font-weight: 700;
+      font-size: 22px;
+      font-weight: 600;
       color: var(--text-primary);
-      letter-spacing: -0.02em;
+      letter-spacing: -0.01em;
     }
 
     .brand-text .tagline {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--text-secondary);
-      font-weight: 500;
+      font-weight: 400;
       margin-top: 2px;
     }
 
@@ -145,6 +147,7 @@
       color: var(--text-tertiary);
       font-weight: 400;
       margin-top: var(--space-xs);
+      letter-spacing: 0.02em;
     }
 
     .section {
@@ -154,24 +157,24 @@
     }
 
     .section-label {
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-tertiary);
+      color: var(--text-secondary);
+      margin-bottom: 4px;
     }
 
     .card {
       background: var(--bg-elevated);
       border: 1px solid var(--border-light);
-      border-radius: var(--radius-md);
-      padding: var(--space-md);
-      box-shadow: var(--shadow-sm);
-      transition: all 0.2s ease;
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      box-shadow: 0 1px 3px rgba(15, 15, 15, 0.04);
+      transition: all 0.15s ease;
     }
 
     .card:hover {
-      box-shadow: var(--shadow-md);
+      box-shadow: 0 2px 6px rgba(15, 15, 15, 0.06);
+      border-color: rgba(55, 53, 47, 0.14);
     }
 
     .card-header {
@@ -269,15 +272,20 @@
       border: 1px solid var(--border-light);
       background: var(--bg-primary);
       color: var(--text-primary);
-      font-size: 13px;
+      font-size: 14px;
       font-family: inherit;
-      transition: all 0.2s ease;
+      transition: all 0.12s ease;
+    }
+
+    input:hover {
+      background: var(--bg-hover);
     }
 
     input:focus {
       outline: none;
-      border-color: var(--text-primary);
-      box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+      border-color: var(--neutral-400);
+      background: var(--bg-primary);
+      box-shadow: 0 0 0 1px rgba(55, 53, 47, 0.16) inset, 0 0 0 1px transparent;
     }
 
     input::placeholder {
@@ -290,13 +298,13 @@
     }
 
     .btn {
-      padding: 8px 16px;
-      border-radius: var(--radius-full);
-      font-size: 13px;
-      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 500;
       font-family: inherit;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.12s ease;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -309,44 +317,44 @@
     .btn-primary {
       background: var(--text-primary);
       color: var(--bg-primary);
-      border: 1px solid var(--text-primary);
-      box-shadow: var(--shadow-sm);
+      border: 1px solid transparent;
+      box-shadow: 0 1px 2px rgba(15, 15, 15, 0.1);
     }
 
     .btn-primary:hover {
-      background: var(--neutral-800);
-      border-color: var(--neutral-800);
-      color: var(--bg-primary);
-      box-shadow: var(--shadow-md);
-      transform: translateY(-1px);
+      background: var(--neutral-700);
+      box-shadow: 0 1px 3px rgba(15, 15, 15, 0.12);
     }
 
     .btn-primary:active {
-      transform: translateY(0);
-      box-shadow: var(--shadow-sm);
+      background: var(--neutral-800);
+      box-shadow: 0 1px 2px rgba(15, 15, 15, 0.08);
     }
 
     .btn-secondary {
-      background: var(--bg-primary);
+      background: rgba(55, 53, 47, 0.055);
       color: var(--text-primary);
-      border: 1px solid var(--border-medium);
+      border: 1px solid transparent;
     }
 
     .btn-secondary:hover {
-      background: var(--bg-tertiary);
-      border-color: var(--neutral-600);
+      background: rgba(55, 53, 47, 0.08);
+    }
+
+    .btn-secondary:active {
+      background: rgba(55, 53, 47, 0.10);
     }
 
     .btn-danger {
-      background: var(--bg-primary);
+      background: rgba(255, 255, 255, 0.8);
       color: var(--text-secondary);
       border: 1px solid var(--border-light);
     }
 
     .btn-danger:hover {
-      background: var(--bg-tertiary);
-      border-color: var(--border-medium);
-      color: var(--text-primary);
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--error);
+      border-color: rgba(239, 68, 68, 0.2);
     }
 
     .btn-group {
@@ -366,25 +374,25 @@
     }
 
     .toggle-btn {
-      padding: 8px 16px;
-      border-radius: var(--radius-full);
-      font-size: 13px;
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      font-size: 14px;
       font-weight: 500;
-      background: var(--bg-secondary);
-      color: var(--text-secondary);
-      border: 1px solid var(--border-light);
+      background: rgba(55, 53, 47, 0.055);
+      color: var(--text-primary);
+      border: 1px solid transparent;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.12s ease;
     }
 
     .toggle-btn:hover {
-      background: var(--neutral-200);
+      background: rgba(55, 53, 47, 0.08);
     }
 
     .toggle-btn.active {
-      background: var(--text-primary);
-      color: var(--bg-primary);
-      border-color: var(--text-primary);
+      background: rgba(55, 53, 47, 0.08);
+      color: var(--text-primary);
+      font-weight: 600;
     }
 
     .status-pill {
