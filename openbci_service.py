@@ -57,7 +57,7 @@ class GanglionService:
 
             # Disable test signal
             self.board.config_board("]")
-            print("[BioMus] Sent test signal OFF command (])")
+            print("[HeadWave] Sent test signal OFF command (])")
             time.sleep(0.1)
 
             # Enable all 4 channels (! @ # $ for channels 1-4)
@@ -65,11 +65,11 @@ class GanglionService:
             self.board.config_board("@")
             self.board.config_board("#")
             self.board.config_board("$")
-            print("[BioMus] Enabled all 4 channels (! @ # $)")
+            print("[HeadWave] Enabled all 4 channels (! @ # $)")
             time.sleep(0.1)
 
         except Exception as e:
-            print(f"[BioMus] Failed to configure board: {e}")
+            print(f"[HeadWave] Failed to configure board: {e}")
             # If command fails, continue anyway
             pass
 
@@ -96,10 +96,10 @@ class GanglionService:
         import time
         try:
             self.board.config_board("]")
-            print("[BioMus] Before stream: Sent test signal OFF command (])")
+            print("[HeadWave] Before stream: Sent test signal OFF command (])")
             time.sleep(0.2)
         except Exception as e:
-            print(f"[BioMus] Failed to send OFF command before stream: {e}")
+            print(f"[HeadWave] Failed to send OFF command before stream: {e}")
         self.board.start_stream(buffer_size)
         self.streaming = True
 

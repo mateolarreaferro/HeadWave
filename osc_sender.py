@@ -50,8 +50,8 @@ class OSCSender:
         """
         data: list of channels, each is a list of samples (same length).
         Sends both per-channel messages and combined message:
-        - /biomus/raw/CH1, /biomus/raw/CH2, etc. (per-channel)
-        - /biomus/raw (all channels combined)
+        - /headwave/raw/CH1, /headwave/raw/CH2, etc. (per-channel)
+        - /headwave/raw (all channels combined)
         If even a single channel is too large, we chunk it.
         """
         if not self._ensure_client() or not self.send_raw:
@@ -64,12 +64,12 @@ class OSCSender:
 
                 # If channel data is small enough, send as single message
                 if len(ch_data) <= self.max_floats_per_message:
-                    self.client.send_message(f"/biomus/raw/{ch_name}", ch_data)
+                    self.client.send_message(f"/headwave/raw/{ch_name}", ch_data)
                 else:
                     # Chunk the data
                     for chunk_idx, i in enumerate(range(0, len(ch_data), self.max_floats_per_message)):
                         chunk = ch_data[i:i + self.max_floats_per_message]
-                        self.client.send_message(f"/biomus/raw/{ch_name}/chunk{chunk_idx}", chunk)
+                        self.client.send_message(f"/headwave/raw/{ch_name}/chunk{chunk_idx}", chunk)
 
             # Send combined message with all channels
             # Flatten all channel data into a single array
@@ -79,12 +79,12 @@ class OSCSender:
                 all_data.extend(ch_data)
 
             if len(all_data) <= self.max_floats_per_message:
-                self.client.send_message("/biomus/raw", all_data)
+                self.client.send_message("/headwave/raw", all_data)
             else:
                 # Chunk the combined data
                 for chunk_idx, i in enumerate(range(0, len(all_data), self.max_floats_per_message)):
                     chunk = all_data[i:i + self.max_floats_per_message]
-                    self.client.send_message(f"/biomus/raw/chunk{chunk_idx}", chunk)
+                    self.client.send_message(f"/headwave/raw/chunk{chunk_idx}", chunk)
 
         except Exception as e:
             logger.error(f"Failed to send timeseries OSC: {e}")
@@ -107,11 +107,11 @@ class OSCSender:
         """
         values: shape [n_channels x n_bands]
         Sends comprehensive band power messages:
-        - Per-channel individual bands: /biomus/bands/CH1/delta, /biomus/bands/CH1/theta, etc.
-        - Per-channel relative: /biomus/bands/CH1/delta-relative, etc. (0-1 normalized)
-        - Cross-channel averages: /biomus/bands/delta, /biomus/bands/theta, etc.
-        - Cross-channel stats: /biomus/bands/delta/max, /biomus/bands/delta/min, etc.
-        - Muse-compatible combined: /biomus/elements/delta_absolute, /biomus/elements/delta_relative, etc.
+        - Per-channel individual bands: /headwave/bands/CH1/delta, /headwave/bands/CH1/theta, etc.
+        - Per-channel relative: /headwave/bands/CH1/delta-relative, etc. (0-1 normalized)
+        - Cross-channel averages: /headwave/bands/delta, /headwave/bands/theta, etc.
+        - Cross-channel stats: /headwave/bands/delta/max, /headwave/bands/delta/min, etc.
+        - Muse-compatible combined: /headwave/elements/delta_absolute, /headwave/elements/delta_relative, etc.
         """
         if not self._ensure_client() or not self.send_bands_enabled:
             return
@@ -131,11 +131,11 @@ class OSCSender:
                     abs_value = ch_vals[band_idx]
 
                     # Send absolute value
-                    self.client.send_message(f"/biomus/bands/{ch_name}/{band_name}", abs_value)
+                    self.client.send_message(f"/headwave/bands/{ch_name}/{band_name}", abs_value)
 
                     # Send relative (normalized) value
                     rel_value = self._normalize_band_value(band_name, abs_value)
-                    self.client.send_message(f"/biomus/bands/{ch_name}/{band_name}-relative", rel_value)
+                    self.client.send_message(f"/headwave/bands/{ch_name}/{band_name}-relative", rel_value)
 
             # 2. Send cross-channel aggregates (mean, max, min)
             for band_idx, band_name in enumerate(bands):
@@ -143,26 +143,26 @@ class OSCSender:
 
                 # Mean across channels
                 mean_val = float(np.mean(band_values))
-                self.client.send_message(f"/biomus/bands/{band_name}", mean_val)
+                self.client.send_message(f"/headwave/bands/{band_name}", mean_val)
 
                 # Max and min across channels
                 max_val = float(np.max(band_values))
                 min_val = float(np.min(band_values))
-                self.client.send_message(f"/biomus/bands/{band_name}/max", max_val)
-                self.client.send_message(f"/biomus/bands/{band_name}/min", min_val)
+                self.client.send_message(f"/headwave/bands/{band_name}/max", max_val)
+                self.client.send_message(f"/headwave/bands/{band_name}/min", min_val)
 
             # 3. Send Muse-compatible combined messages (all 4 channels in one message)
-            # Format: /biomus/elements/<band>_absolute sends [CH1, CH2, CH3, CH4]
-            # Format: /biomus/elements/<band>_relative sends [CH1_rel, CH2_rel, CH3_rel, CH4_rel]
+            # Format: /headwave/elements/<band>_absolute sends [CH1, CH2, CH3, CH4]
+            # Format: /headwave/elements/<band>_relative sends [CH1_rel, CH2_rel, CH3_rel, CH4_rel]
             for band_idx, band_name in enumerate(bands):
                 # Absolute values: all channels for this band
                 abs_values = [float(values[ch_idx][band_idx]) for ch_idx in range(n_channels)]
-                self.client.send_message(f"/biomus/elements/{band_name}_absolute", abs_values)
+                self.client.send_message(f"/headwave/elements/{band_name}_absolute", abs_values)
 
                 # Relative values: normalized for all channels
                 rel_values = [self._normalize_band_value(band_name, values[ch_idx][band_idx])
                              for ch_idx in range(n_channels)]
-                self.client.send_message(f"/biomus/elements/{band_name}_relative", rel_values)
+                self.client.send_message(f"/headwave/elements/{band_name}_relative", rel_values)
 
         except Exception as e:
             logger.error(f"Failed to send bands OSC: {e}")

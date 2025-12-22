@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-OSC Receiver Test Script for BioMus
-Listens for OSC messages from the BioMus application and displays them.
+OSC Receiver Test Script for HeadWave
+Listens for OSC messages from the HeadWave application and displays them.
 """
 
 from pythonosc.dispatcher import Dispatcher
@@ -13,7 +13,7 @@ import sys
 def print_header():
     """Print a nice header for the OSC receiver"""
     print("=" * 80)
-    print("BioMus OSC Receiver Test")
+    print("HeadWave OSC Receiver Test")
     print("=" * 80)
     print()
 
@@ -142,7 +142,7 @@ def handle_default(address, *args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test OSC receiver for BioMus EEG data",
+        description="Test OSC receiver for HeadWave EEG data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example usage:
@@ -168,30 +168,30 @@ Example usage:
     # Create dispatcher and map handlers
     dispatcher = Dispatcher()
 
-    # Raw timeseries data handlers (new /biomus namespace)
-    dispatcher.map("/biomus/raw/CH*", handle_raw_channel)
-    dispatcher.map("/biomus/raw", handle_raw_combined)
-    dispatcher.map("/biomus/raw/CH*/chunk*", handle_raw_chunked)
-    dispatcher.map("/biomus/raw/chunk*", handle_raw_chunked)
+    # Raw timeseries data handlers (new /headwave namespace)
+    dispatcher.map("/headwave/raw/CH*", handle_raw_channel)
+    dispatcher.map("/headwave/raw", handle_raw_combined)
+    dispatcher.map("/headwave/raw/CH*/chunk*", handle_raw_chunked)
+    dispatcher.map("/headwave/raw/chunk*", handle_raw_chunked)
 
-    # Band power handlers (new /biomus namespace)
+    # Band power handlers (new /headwave namespace)
     # Individual channel bands (absolute and relative)
-    dispatcher.map("/biomus/bands/CH*/*", handle_band_individual)
+    dispatcher.map("/headwave/bands/CH*/*", handle_band_individual)
     # Cross-channel aggregates
-    dispatcher.map("/biomus/bands/*/max", handle_band_aggregate)
-    dispatcher.map("/biomus/bands/*/min", handle_band_aggregate)
-    dispatcher.map("/biomus/bands/delta", handle_band_aggregate)
-    dispatcher.map("/biomus/bands/theta", handle_band_aggregate)
-    dispatcher.map("/biomus/bands/alpha", handle_band_aggregate)
-    dispatcher.map("/biomus/bands/beta", handle_band_aggregate)
-    dispatcher.map("/biomus/bands/gamma", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/*/max", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/*/min", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/delta", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/theta", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/alpha", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/beta", handle_band_aggregate)
+    dispatcher.map("/headwave/bands/gamma", handle_band_aggregate)
 
     # Computer vision / facial feature handlers (new /cv namespace)
     dispatcher.map("/cv/*", handle_cv_features)
 
     # Muse-compatible combined messages
-    dispatcher.map("/biomus/elements/*_absolute", handle_muse_compat_absolute)
-    dispatcher.map("/biomus/elements/*_relative", handle_muse_compat_relative)
+    dispatcher.map("/headwave/elements/*_absolute", handle_muse_compat_absolute)
+    dispatcher.map("/headwave/elements/*_relative", handle_muse_compat_relative)
 
     # Fallback for any other messages
     dispatcher.set_default_handler(handle_default)
@@ -199,10 +199,10 @@ Example usage:
     # Create and start server
     print_header()
     print(f"🎧 Listening for OSC messages on {args.ip}:{args.port}")
-    print(f"📡 Waiting for data from BioMus...")
-    print(f"   - Raw EEG: /biomus/raw/CH*, /biomus/raw")
-    print(f"   - Band Powers: /biomus/bands/CH*/<band>, /biomus/bands/<band>")
-    print(f"   - Muse-compat: /biomus/elements/<band>_absolute, /biomus/elements/<band>_relative")
+    print(f"📡 Waiting for data from HeadWave...")
+    print(f"   - Raw EEG: /headwave/raw/CH*, /headwave/raw")
+    print(f"   - Band Powers: /headwave/bands/CH*/<band>, /headwave/bands/<band>")
+    print(f"   - Muse-compat: /headwave/elements/<band>_absolute, /headwave/elements/<band>_relative")
     print(f"   - CV Features: /cv/*")
     print()
     print("Press Ctrl+C to stop")

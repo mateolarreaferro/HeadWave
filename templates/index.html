@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>BioMus - Neural Audio Interface</title>
+  <title>HeadWave - Neural Audio Interface</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+  <script src="/static/sketch.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -551,6 +553,19 @@
       flex-direction: column;
     }
 
+    /* p5.js canvas styling */
+    #p5-container {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    
+    #p5-container canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
     #timeseriesChart,
     #fftChart,
     #bandsChart {
@@ -783,9 +798,9 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-header">
-        <div class="brand-logo">B</div>
+        <div class="brand-logo">H</div>
         <div class="brand-text">
-          <h1>BioMus</h1>
+          <h1>HeadWave</h1>
           <div class="tagline">Biosignal Creative Platform</div>
         </div>
       </div>
@@ -799,20 +814,34 @@
       <div id="global-error" class="alert alert-error"></div>
       <div id="global-success" class="alert alert-success"></div>
 
-      <!-- Step 1: Connect -->
+      <!-- Simulator Mode --><div class="card" style="background: var(--bg-tertiary);">
+        <div class="card-title" style="margin-bottom: var(--space-md);">🧪 Debug Mode</div>
+        <div class="toggle-group" style="margin-bottom: var(--space-sm);">
+          <button id="toggle-simulator" class="toggle-btn">Use Simulator</button>
+        </div>
+        <div id="simulator-controls" style="display:none; margin-top: var(--space-md);">
+          <label class="field-label">Brain State</label>
+          <select id="simulator-mode" style="width: 100%; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--border-light); background: var(--bg-primary); font-family: inherit; font-size: 13px;">
+            <option value="normal">Normal</option>
+            <option value="meditation">Meditation (High Alpha/Theta)</option>
+            <option value="focused">Focused (High Beta)</option>
+            <option value="drowsy">Drowsy (High Delta)</option>
+          </select>
+        </div>
+        <div class="helper-text" style="margin-top: var(--space-sm);">
+          Test without EEG hardware using synthetic data
+        </div>
+      </div>
+
+      <!-- Connection & Streaming (Compact) -->
+      <!-- Connection -->
       <div class="card">
         <div class="card-header">
-          <div class="step-badge">1</div>
-          <div class="card-title-group">
-            <div class="card-title">Connect EEG</div>
+          <div class="card-title-group" style="flex: 1;">
+            <div class="card-title">Connection</div>
             <div class="card-subtitle" id="status-subtext">Ready to connect</div>
           </div>
           <div class="status-indicator" id="status-dot"></div>
-        </div>
-
-        <div class="info-box">
-          <strong>Bluetooth:</strong> Leave empty and click Connect<br>
-          <strong>Serial:</strong> Enter port (e.g., /dev/tty.usbmodem14101)
         </div>
 
         <div class="field-group">
@@ -833,38 +862,37 @@
         </div>
       </div>
 
-      <!-- Step 2: Stream -->
+      <!-- Streaming -->
       <div class="card">
         <div class="card-header">
-          <div class="step-badge">2</div>
-          <div class="card-title-group">
-            <div class="card-title">Start Streaming</div>
-            <div class="card-subtitle">
-              <span id="stream-pill" class="status-pill">Ready</span>
-              <span id="camera-pill" class="status-pill" style="margin-left: 8px;">Camera: Ready</span>
-            </div>
-          </div>
+          <div class="card-title">Streaming</div>
+          <span id="stream-pill" class="status-pill">Ready</span>
         </div>
 
-        <div class="field-group">
-          <label class="field-label">EEG Stream</label>
+        <div class="field-group" style="margin-bottom: 0;">
+          <label class="field-label">EEG Data</label>
           <div class="btn-group">
             <button id="btn-start" class="btn btn-primary" style="flex: 1;">
-              Start EEG
+              Start
             </button>
             <button id="btn-stop" class="btn btn-secondary">
               Stop
             </button>
           </div>
         </div>
+      </div>
 
-        <div class="divider"></div>
+      <!-- Camera -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Camera</div>
+          <span id="camera-pill" class="status-pill">Ready</span>
+        </div>
 
         <div class="field-group" style="margin-bottom: 0;">
-          <label class="field-label">Camera Stream</label>
           <div class="btn-group">
             <button id="btn-camera-start" class="btn btn-primary" style="flex: 1;">
-              Start Camera
+              Start
             </button>
             <button id="btn-camera-stop" class="btn btn-secondary">
               Stop
@@ -889,6 +917,7 @@
         <button id="tab-fft" class="mode-tab">FFT</button>
         <button id="tab-bands" class="mode-tab">Bands</button>
         <button id="tab-camera" class="mode-tab">Camera</button>
+        <button id="tab-sketch" class="mode-tab">Sketch</button>
       </div>
     </header>
 
@@ -912,6 +941,178 @@
           <canvas id="bandsChart" style="display:none;"></canvas>
           <div id="cameraView" style="display:none; width: 100%; flex: 1; position: relative; min-height: 0; max-height: 100%; overflow: hidden;">
             <img id="cameraFeed" style="width: 100%; height: 100%; object-fit: cover; object-position: center; border-radius: 8px;" />
+          </div>
+
+          <div id="sketchView" style="display:none; width: 100%; height: 100%; position: relative;">
+            <div id="p5-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div>
+            
+            <!-- Enhanced Visualization Controls -->
+            <div id="viz-controls" style="position: absolute; top: 10px; right: 10px; background: rgba(20, 20, 30, 0.95); padding: 15px; border-radius: 8px; color: white; font-family: -apple-system, sans-serif; font-size: 12px; width: 280px; max-height: calc(100% - 20px); overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3); backdrop-filter: blur(10px); z-index: 100;">
+              
+              <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+                <span>Visualization Controls</span>
+                <button id="viz-toggle" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; padding: 0;">▼</button>
+              </div>
+              
+              <div id="viz-controls-content">
+                <!-- Visualization Mode -->
+                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                  <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #aaa;">Mode</label>
+                  <select id="viz-mode" style="width: 100%; padding: 6px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 12px;">
+                    <option value="particles">Particles</option>
+                    <option value="waves">Waves</option>
+                    <option value="radial">Radial Burst</option>
+                    <option value="flow">Flow Field</option>
+                    <option value="mandala">Mandala</option>
+                  </select>
+                </div>
+
+                <!-- Visual Parameters -->
+                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                  <label style="display: block; margin-bottom: 10px; font-weight: 500; color: #aaa;">Parameters</label>
+                  
+                  <div style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                      <span style="color: #ccc; font-size: 11px;">Count</span>
+                      <span id="viz-count-val" style="color: #4af; font-size: 11px;">100</span>
+                    </div>
+                    <input type="range" id="viz-count" min="20" max="300" value="100" style="width: 100%;">
+                  </div>
+
+                  <div style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                      <span style="color: #ccc; font-size: 11px;">Size</span>
+                      <span id="viz-size-val" style="color: #4af; font-size: 11px;">10</span>
+                    </div>
+                    <input type="range" id="viz-size" min="2" max="30" value="10" style="width: 100%;">
+                  </div>
+
+                  <div style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                      <span style="color: #ccc; font-size: 11px;">Speed</span>
+                      <span id="viz-speed-val" style="color: #4af; font-size: 11px;">1.0</span>
+                    </div>
+                    <input type="range" id="viz-speed" min="0.1" max="5" step="0.1" value="1.0" style="width: 100%;">
+                  </div>
+
+                  <div style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                      <span style="color: #ccc; font-size: 11px;">Trails</span>
+                      <span id="viz-trails-val" style="color: #4af; font-size: 11px;">50</span>
+                    </div>
+                    <input type="range" id="viz-trails" min="0" max="100" value="50" style="width: 100%;">
+                  </div>
+                </div>
+
+                <!-- Data Mapping -->
+                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                  <label style="display: block; margin-bottom: 10px; font-weight: 500; color: #aaa;">Data Mapping</label>
+                  
+                  <!-- Movement Speed -->
+                  <div style="margin-bottom: 8px;">
+                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Movement Speed</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                      <select id="map-movement-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="bands" selected>Bands</option>
+                        <option value="fft">FFT</option>
+                        <option value="timeseries">Time</option>
+                        <option value="camera">Camera</option>
+                      </select>
+                      <select id="map-movement-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="delta">Delta</option>
+                        <option value="theta" selected>Theta</option>
+                        <option value="alpha">Alpha</option>
+                        <option value="beta">Beta</option>
+                        <option value="gamma">Gamma</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Color Hue -->
+                  <div style="margin-bottom: 8px;">
+                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Color Hue</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                      <select id="map-hue-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="bands" selected>Bands</option>
+                        <option value="fft">FFT</option>
+                        <option value="timeseries">Time</option>
+                        <option value="camera">Camera</option>
+                      </select>
+                      <select id="map-hue-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="delta">Delta</option>
+                        <option value="theta">Theta</option>
+                        <option value="alpha">Alpha</option>
+                        <option value="beta" selected>Beta</option>
+                        <option value="gamma">Gamma</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Element Size -->
+                  <div style="margin-bottom: 8px;">
+                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Element Size</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                      <select id="map-size-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="bands" selected>Bands</option>
+                        <option value="fft">FFT</option>
+                        <option value="timeseries">Time</option>
+                        <option value="camera">Camera</option>
+                      </select>
+                      <select id="map-size-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="delta">Delta</option>
+                        <option value="theta">Theta</option>
+                        <option value="alpha" selected>Alpha</option>
+                        <option value="beta">Beta</option>
+                        <option value="gamma">Gamma</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Brightness -->
+                  <div style="margin-bottom: 6px;">
+                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Brightness</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                      <select id="map-brightness-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="bands" selected>Bands</option>
+                        <option value="fft">FFT</option>
+                        <option value="timeseries">Time</option>
+                        <option value="camera">Camera</option>
+                      </select>
+                      <select id="map-brightness-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
+                        <option value="delta">Delta</option>
+                        <option value="theta">Theta</option>
+                        <option value="alpha">Alpha</option>
+                        <option value="beta">Beta</option>
+                        <option value="gamma" selected>Gamma</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Color Scheme -->
+                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                  <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #aaa;">Color Palette</label>
+                  <select id="viz-colorscheme" style="width: 100%; padding: 6px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 12px;">
+                    <option value="cool">Cool (Blue-Purple)</option>
+                    <option value="warm">Warm (Red-Orange)</option>
+                    <option value="earth">Earth (Green-Brown)</option>
+                    <option value="rainbow">Rainbow</option>
+                    <option value="monochrome">Monochrome</option>
+                  </select>
+                </div>
+
+                <!-- Presets -->
+                <div>
+                  <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #aaa;">Quick Presets</label>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <button class="viz-preset" data-preset="meditation" style="padding: 8px; background: rgba(100,150,255,0.2); border: 1px solid rgba(100,150,255,0.4); border-radius: 4px; color: #aaf; cursor: pointer; font-size: 11px; transition: all 0.2s;">Calm</button>
+                    <button class="viz-preset" data-preset="focused" style="padding: 8px; background: rgba(255,100,150,0.2); border: 1px solid rgba(255,100,150,0.4); border-radius: 4px; color: #faa; cursor: pointer; font-size: 11px; transition: all 0.2s;">Energy</button>
+                    <button class="viz-preset" data-preset="psychedelic" style="padding: 8px; background: rgba(200,100,255,0.2); border: 1px solid rgba(200,100,255,0.4); border-radius: 4px; color: #caf; cursor: pointer; font-size: 11px; transition: all 0.2s;">Trip</button>
+                    <button class="viz-preset" data-preset="minimal" style="padding: 8px; background: rgba(150,150,150,0.2); border: 1px solid rgba(150,150,150,0.4); border-radius: 4px; color: #ccc; cursor: pointer; font-size: 11px; transition: all 0.2s;">Minimal</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -963,8 +1164,11 @@
       </div>
 
       <div class="section">
-        <div class="section-label">OSC Output</div>
-        <div class="card">
+        <div class="section-label" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="osc-section-header">
+          <span>OSC Output</span>
+          <span id="osc-toggle-icon" style="font-size: 14px;">▼</span>
+        </div>
+        <div class="card" id="osc-section-content">
           <div class="field-group">
             <label class="field-label">Target Address</label>
             <div class="input-row">
@@ -1003,11 +1207,28 @@
             </button>
           </div>
         </div>
+
+        <!-- AI Assistant Chat -->
+        <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="ai-section-header">
+          <span>AI Assistant</span>
+          <span id="ai-toggle-icon" style="font-size: 14px;">▶</span>
+        </div>
+        <div class="card" id="ai-section-content" style="display: none; flex-direction: column; height: 280px;">
+          <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: var(--space-sm); padding: var(--space-sm); background: var(--bg-primary); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: var(--space-sm);"></div>
+          <div style="display: flex; gap: var(--space-sm);">
+            <input id="chatInput" type="text" placeholder="Ask about EEG, OSC, or visualization..." style="flex: 1; font-size: 12px; padding: 8px;" />
+            <button id="chatSend" class="btn btn-primary" style="padding: 8px 12px; font-size: 12px;">Send</button>
+          </div>
+        </div>
       </div>
     </section>
   </main>
 
   <script>
+    // Debug: Check if p5 is loaded
+    console.log('[DEBUG] Script started');
+    console.log('[DEBUG] p5 available:', typeof p5 !== 'undefined');
+    
     // Stream configuration constants - optimized for real-time EEG visualization
     const WINDOW_SEC = 4.0;  // 4 seconds provides good balance of temporal/frequency resolution
     const UPDATE_INTERVAL_MS = 50;  // 50ms = 20 updates/second for smooth visualization
@@ -1257,10 +1478,12 @@
     const tabFFT = document.getElementById("tab-fft");
     const tabBands = document.getElementById("tab-bands");
     const tabCamera = document.getElementById("tab-camera");
+    const tabSketch = document.getElementById("tab-sketch");
     tabTS.onclick = () => switchMode("timeseries");
     tabFFT.onclick = () => switchMode("fft");
     tabBands.onclick = () => switchMode("bands");
     tabCamera.onclick = () => switchMode("camera");
+    tabSketch.onclick = () => switchMode("sketch");
 
     function switchMode(mode) {
       if (mode === currentMode) return;
@@ -1269,50 +1492,52 @@
       tabFFT.classList.toggle("active", mode === "fft");
       tabBands.classList.toggle("active", mode === "bands");
       tabCamera.classList.toggle("active", mode === "camera");
+      tabSketch.classList.toggle("active", mode === "sketch");
 
       // Show/hide scale controls based on mode
       const scaleControls = document.getElementById("scale-controls");
       if (scaleControls) {
-        scaleControls.style.display = mode === "camera" ? "none" : "flex";
+        scaleControls.style.display = (mode === "camera" || mode === "sketch") ? "none" : "flex";
       }
+
+      // Hide all views
+      document.getElementById("timeseriesChart").style.display = "none";
+      document.getElementById("fftChart").style.display = "none";
+      document.getElementById("bandsChart").style.display = "none";
+      document.getElementById("cameraView").style.display = "none";
+      document.getElementById("cameraFeatures").style.display = "none";
+      document.getElementById("sketchView").style.display = "none";
 
       if (mode === "timeseries") {
         visualTitle.textContent = "Time Series";
         visualSubtitle.textContent = "Real-time biosignal traces with temporal dynamics";
         document.getElementById("timeseriesChart").style.display = "block";
-        document.getElementById("fftChart").style.display = "none";
-        document.getElementById("bandsChart").style.display = "none";
-        document.getElementById("cameraView").style.display = "none";
-        document.getElementById("cameraFeatures").style.display = "none";
       } else if (mode === "fft") {
         visualTitle.textContent = "FFT Spectrum";
         visualSubtitle.textContent = "Real-time frequency domain analysis using Fast Fourier Transform";
-        document.getElementById("timeseriesChart").style.display = "none";
         document.getElementById("fftChart").style.display = "block";
-        document.getElementById("bandsChart").style.display = "none";
-        document.getElementById("cameraView").style.display = "none";
-        document.getElementById("cameraFeatures").style.display = "none";
       } else if (mode === "camera") {
         visualTitle.textContent = "Camera / FaceSynth";
         visualSubtitle.textContent = "Real-time facial feature tracking with OSC output";
-        document.getElementById("timeseriesChart").style.display = "none";
-        document.getElementById("fftChart").style.display = "none";
-        document.getElementById("bandsChart").style.display = "none";
         document.getElementById("cameraView").style.display = "block";
         document.getElementById("cameraFeatures").style.display = "block";
+      } else if (mode === "sketch") {
+        visualTitle.textContent = "Sketch";
+        visualSubtitle.textContent = "Generative art visualization driven by EEG frequency bands";
+        document.getElementById("sketchView").style.display = "block";
+        // Initialize or resume p5 sketch
+        if (typeof p5Sketch !== 'undefined' && !p5Sketch.isLooping()) {
+          p5Sketch.loop();
+        }
       } else {
         visualTitle.textContent = "Frequency Bands";
         visualSubtitle.textContent = "Per-channel power distribution across delta, theta, alpha, beta, and gamma bands";
-        document.getElementById("timeseriesChart").style.display = "none";
-        document.getElementById("fftChart").style.display = "none";
         document.getElementById("bandsChart").style.display = "block";
-        document.getElementById("cameraView").style.display = "none";
-        document.getElementById("cameraFeatures").style.display = "none";
       }
 
       visualMeta.textContent = `Mode: ${mode} · Window: ${WINDOW_SEC.toFixed(1)}s`;
 
-      if (ws && mode !== "camera") {
+      if (ws && mode !== "camera" && mode !== "assistant" && mode !== "sketch") {
         ws.send(
           JSON.stringify({
             mode,
@@ -1583,6 +1808,11 @@
         });
       }
       tsChart.update("none");
+      
+      // Feed timeseries data to Sketch
+      if (typeof Sketch !== 'undefined') {
+        Sketch.updateTimeSeries(channels, data);
+      }
     }
 
     function updateFFTChart(channels, freqs, psd) {
@@ -1631,6 +1861,11 @@
         });
       }
       fftChart.update("none");
+      
+      // Feed FFT data to Sketch (use first channel for average)
+      if (typeof Sketch !== 'undefined' && psd && psd[0]) {
+        Sketch.updateFFT(freqs, psd[0]);
+      }
     }
 
     function updateBandsChart(channels, bandNames, values) {
@@ -1744,6 +1979,11 @@
           updateFeatureMeter("mouth", features.mouth_openness || 0);
           updateFeatureMeter("roll", (features.head_roll || 0) / 30 + 0.5); // Map -15 to 15 -> 0 to 1
           updateFeatureMeter("smile", features.smile_curvature || 0);
+          
+          // Feed camera data to Sketch
+          if (typeof Sketch !== 'undefined') {
+            Sketch.updateCamera(features);
+          }
         } else if (msg.type === "error") {
           errorMsg.textContent = msg.message || "Camera error.";
           errorMsg.style.display = "block";
@@ -1782,9 +2022,253 @@
       }
     }
 
+    // -------- Simulator Controls --------
+    let useSimulator = false;
+    const toggleSimBtn = document.getElementById('toggle-simulator');
+    const simControls = document.getElementById('simulator-controls');
+    const simMode = document.getElementById('simulator-mode');
+
+    toggleSimBtn.onclick = async () => {
+      useSimulator = !useSimulator;
+      toggleSimBtn.classList.toggle('active', useSimulator);
+      simControls.style.display = useSimulator ? 'block' : 'none';
+      
+      // Update backend
+      await postJSON('/api/use_simulator', { enabled: useSimulator });
+      
+      // Update UI message
+      const mode = useSimulator ? 'Simulator' : 'Real Hardware';
+      showSuccess(`Switched to ${mode} mode`);
+    };
+
+    simMode.onchange = async () => {
+      const mode = simMode.value;
+      await postJSON('/api/simulator/mode', { mode });
+      showSuccess(`Simulator mode: ${mode}`);
+    };
+
     // Initial status check
     refreshStatus();
     setOscChip();
+    
+    // DEBUG: Try to initialize sketch on page load
+    console.log('[DEBUG] Page loaded, attempting immediate sketch init');
+    setTimeout(() => {
+      console.log('[DEBUG] Calling initP5Sketch from page load');
+      initP5Sketch();
+    }, 1000);
+
+    // Visualization controls panel toggle
+    const vizToggle = document.getElementById('viz-toggle');
+    const vizContent = document.getElementById('viz-controls-content');
+    if (vizToggle && vizContent) {
+      vizToggle.addEventListener('click', () => {
+        const isVisible = vizContent.style.display !== 'none';
+        vizContent.style.display = isVisible ? 'none' : 'block';
+        vizToggle.textContent = isVisible ? '▶' : '▼';
+      });
+    }
+
+    // OSC Output section collapse toggle
+    const oscHeader = document.getElementById('osc-section-header');
+    const oscContent = document.getElementById('osc-section-content');
+    const oscToggleIcon = document.getElementById('osc-toggle-icon');
+    if (oscHeader && oscContent && oscToggleIcon) {
+      oscHeader.addEventListener('click', () => {
+        const isVisible = oscContent.style.display !== 'none';
+        oscContent.style.display = isVisible ? 'none' : 'block';
+        oscToggleIcon.textContent = isVisible ? '▶' : '▼';
+      });
+    }
+
+    // AI Assistant section collapse toggle (starts collapsed)
+    const aiHeader = document.getElementById('ai-section-header');
+    const aiContent = document.getElementById('ai-section-content');
+    const aiToggleIcon = document.getElementById('ai-toggle-icon');
+    if (aiHeader && aiContent && aiToggleIcon) {
+      aiHeader.addEventListener('click', () => {
+        const isVisible = aiContent.style.display !== 'none';
+        aiContent.style.display = isVisible ? 'none' : 'flex';
+        aiToggleIcon.textContent = isVisible ? '▶' : '▼';
+      });
+    }
+
+    // -------- AI Assistant Chat --------
+    const chatInput = document.getElementById("chatInput");
+    const chatSend = document.getElementById("chatSend");
+    const chatMessages = document.getElementById("chatMessages");
+
+    async function sendChatMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+
+      // Add user message to chat
+      const userMsg = document.createElement("div");
+      userMsg.style.cssText = "background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 8px; align-self: flex-end; max-width: 85%; font-size: 12px;";
+      userMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">YOU</div><div style="color: var(--text-primary); line-height: 1.4;">${message}</div>`;
+      chatMessages.appendChild(userMsg);
+      chatInput.value = "";
+
+      // Scroll to bottom
+      chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
+
+      // Show thinking indicator
+      const thinkingMsg = document.createElement("div");
+      thinkingMsg.id = "thinking-indicator";
+      thinkingMsg.style.cssText = "background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 8px; align-self: flex-start; max-width: 85%; font-size: 12px;";
+      thinkingMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">ASSISTANT</div><div style="color: var(--text-secondary); line-height: 1.4;">Thinking...</div>`;
+      chatMessages.appendChild(thinkingMsg);
+      chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
+
+      try {
+        const response = await fetch("/api/assistant/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+        const data = await response.json();
+
+        // Remove thinking indicator
+        const thinking = document.getElementById("thinking-indicator");
+        if (thinking) thinking.remove();
+
+        // Add assistant response
+        const assistantMsg = document.createElement("div");
+        assistantMsg.style.cssText = "background: var(--text-primary); color: var(--bg-primary); border-radius: var(--radius-md); padding: 8px; align-self: flex-start; max-width: 85%; font-size: 12px;";
+        assistantMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; opacity: 0.7; margin-bottom: 4px;">ASSISTANT</div><div style="white-space: pre-wrap; line-height: 1.4;">${data.response || "Sorry, I couldn't generate a response."}</div>`;
+        chatMessages.appendChild(assistantMsg);
+        chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
+      } catch (error) {
+        // Remove thinking indicator
+        const thinking = document.getElementById("thinking-indicator");
+        if (thinking) thinking.remove();
+
+        const errorMsg = document.createElement("div");
+        errorMsg.style.cssText = "background: var(--bg-tertiary); border: 1px solid var(--border-medium); border-radius: var(--radius-md); padding: 8px; align-self: flex-start; max-width: 85%; font-size: 12px;";
+        errorMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">ERROR</div><div style="color: var(--text-secondary); line-height: 1.4;">Failed to get response: ${error.message}</div>`;
+        chatMessages.appendChild(errorMsg);
+        chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
+      }
+    }
+
+    chatSend.onclick = sendChatMessage;
+    chatInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") sendChatMessage();
+    });
+
+    // -------- p5.js Enhanced Sketch --------
+    let p5Sketch = null;
+    let sketchInitialized = false;
+
+    function initP5Sketch() {
+      if (sketchInitialized || p5Sketch) {
+        console.log('[Sketch] Already initialized');
+        return;
+      }
+      
+      console.log('[Sketch] Initializing enhanced p5 sketch...');
+      
+      const sketch = (p) => {
+        p.setup = function() {
+          const container = document.getElementById('p5-container');
+          if (!container) {
+            console.error('[Sketch] Container not found!');
+            return;
+          }
+          
+          const parent = container.parentElement;
+          const rect = parent ? parent.getBoundingClientRect() : container.getBoundingClientRect();
+          const width = rect.width || window.innerWidth * 0.7;
+          const height = rect.height || window.innerHeight * 0.7;
+          
+          const canvas = p.createCanvas(width, height);
+          canvas.parent('p5-container');
+          p.background(15, 15, 25);
+          
+          // Initialize the Sketch system
+          Sketch.init(p);
+          Sketch.modes.particles.init(Sketch.config.count);
+          
+          console.log('[Sketch] Enhanced canvas created:', p.width, 'x', p.height);
+        };
+
+        p.draw = function() {
+          // Use Sketch draw system
+          Sketch.draw();
+        };
+
+        p.windowResized = function() {
+          const container = document.getElementById('p5-container');
+          if (container) {
+            const parent = container.parentElement;
+            const rect = parent ? parent.getBoundingClientRect() : container.getBoundingClientRect();
+            const width = rect.width || window.innerWidth * 0.7;
+            const height = rect.height || window.innerHeight * 0.7;
+            
+            p.resizeCanvas(width, height);
+            console.log('[Sketch] Canvas resized to:', width, 'x', height);
+            
+            // Reinitialize current mode with new dimensions
+            Sketch.modes[Sketch.config.mode].init(Sketch.config.count);
+          }
+        };
+      };
+
+      p5Sketch = new p5(sketch);
+      sketchInitialized = true;
+      console.log('[Sketch] Enhanced p5 initialized');
+    }
+
+    // Update bands data for enhanced p5 sketch
+    const originalUpdateBandsChart = updateBandsChart;
+    updateBandsChart = function(channels, bandNames, values) {
+      originalUpdateBandsChart(channels, bandNames, values);
+      
+      // Calculate average across all channels for each band and feed to Sketch
+      if (values && values.length > 0 && bandNames) {
+        const bands = {};
+        bandNames.forEach((band, idx) => {
+          const avg = values.reduce((sum, channelValues) => sum + (channelValues[idx] || 0), 0) / values.length;
+          bands[band.toLowerCase()] = avg;
+        });
+        Sketch.updateBands(bands);
+      }
+    };
+
+    // Request bands data when on sketch tab
+    const originalSwitchMode = switchMode;
+    switchMode = function(mode) {
+      originalSwitchMode(mode);
+      
+      // When switching to sketch mode, initialize p5 and request bands data
+      if (mode === "sketch") {
+        console.log('[Sketch] Switched to sketch mode');
+        
+        // Initialize p5 sketch if not already done (with longer delay to ensure DOM is ready)
+        if (!sketchInitialized) {
+          console.log('[Sketch] Will initialize in 200ms...');
+          setTimeout(() => {
+            initP5Sketch();
+          }, 200);
+        } else {
+          console.log('[Sketch] Already initialized, should be visible');
+        }
+        
+        // Request bands data if streaming
+        if (ws && streaming) {
+          console.log('[Sketch] Requesting bands data');
+          ws.send(
+            JSON.stringify({
+              mode: "bands",
+              window_sec: WINDOW_SEC,
+              interval_ms: UPDATE_INTERVAL_MS,
+            })
+          );
+        } else {
+          console.log('[Sketch] Not streaming yet, start EEG first');
+        }
+      }
+    };
   </script>
 </body>
 </html>
