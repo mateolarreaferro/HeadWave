@@ -1165,22 +1165,69 @@
           </div>
         </div>
 
-        <div id="cameraFeatures" style="display:none; margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border-light); flex-shrink: 0;">
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-sm);">
-            <div class="feature-meter">
-              <div class="field-label">Mouth</div>
-              <div class="progress-bar"><div id="meter-mouth" class="progress-fill"></div></div>
-              <div class="feature-value"><span id="val-mouth">0.00</span></div>
+        <div id="cameraFeatures" style="display:none; margin-top: var(--space-sm); border-top: 1px solid var(--border-light); flex-shrink: 0;">
+          <!-- Toggle Header -->
+          <div id="cv-features-toggle" class="section-header" style="cursor: pointer; padding: var(--space-xs) 0; display: flex; justify-content: space-between; align-items: center;">
+            <span class="field-label" style="color: var(--text-secondary);">CV Features</span>
+            <span id="cv-features-arrow" style="color: var(--text-secondary); font-size: 12px;">▼</span>
+          </div>
+          <div id="cv-features-content" style="padding-top: var(--space-xs);">
+            <!-- Face Features -->
+            <div class="field-label" style="margin-bottom: 4px; color: var(--text-muted); font-size: 10px;">FACE</div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-sm); margin-bottom: var(--space-sm);">
+              <div class="feature-meter">
+                <div class="field-label">Mouth</div>
+                <div class="progress-bar"><div id="meter-mouth" class="progress-fill"></div></div>
+                <div class="feature-value"><span id="val-mouth">0.00</span></div>
+              </div>
+              <div class="feature-meter">
+                <div class="field-label">Smile</div>
+                <div class="progress-bar"><div id="meter-smile" class="progress-fill"></div></div>
+                <div class="feature-value"><span id="val-smile">0.00</span></div>
+              </div>
+              <div class="feature-meter">
+                <div class="field-label">Roll</div>
+                <div class="progress-bar"><div id="meter-roll" class="progress-fill"></div></div>
+                <div class="feature-value"><span id="val-roll">0.00</span></div>
+              </div>
             </div>
-            <div class="feature-meter">
-              <div class="field-label">Roll</div>
-              <div class="progress-bar"><div id="meter-roll" class="progress-fill"></div></div>
-              <div class="feature-value"><span id="val-roll">0.00</span></div>
+
+            <!-- Eye Gaze -->
+            <div class="field-label" style="margin-bottom: 4px; color: var(--text-muted); font-size: 10px;">EYE GAZE</div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-sm); margin-bottom: var(--space-sm);">
+              <div class="feature-meter">
+                <div class="field-label">Gaze X</div>
+                <div class="progress-bar"><div id="meter-gaze-x" class="progress-fill" style="background: var(--accent-purple);"></div></div>
+                <div class="feature-value"><span id="val-gaze-x">0.00</span></div>
+              </div>
+              <div class="feature-meter">
+                <div class="field-label">Gaze Y</div>
+                <div class="progress-bar"><div id="meter-gaze-y" class="progress-fill" style="background: var(--accent-purple);"></div></div>
+                <div class="feature-value"><span id="val-gaze-y">0.00</span></div>
+              </div>
             </div>
-            <div class="feature-meter">
-              <div class="field-label">Smile</div>
-              <div class="progress-bar"><div id="meter-smile" class="progress-fill"></div></div>
-              <div class="feature-value"><span id="val-smile">0.00</span></div>
+
+            <!-- Hands -->
+            <div class="field-label" style="margin-bottom: 4px; color: var(--text-muted); font-size: 10px;">HANDS</div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-sm);">
+              <div class="feature-meter">
+                <div class="field-label">Left Hand</div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span id="left-hand-status" class="badge" style="font-size: 10px;">Not detected</span>
+                  <span id="left-hand-gesture" style="font-size: 11px; color: var(--text-secondary);">--</span>
+                </div>
+                <div class="progress-bar" style="margin-top: 4px;"><div id="meter-left-pinch" class="progress-fill" style="background: var(--accent-green);"></div></div>
+                <div class="feature-value">Pinch: <span id="val-left-pinch">0.00</span></div>
+              </div>
+              <div class="feature-meter">
+                <div class="field-label">Right Hand</div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span id="right-hand-status" class="badge" style="font-size: 10px;">Not detected</span>
+                  <span id="right-hand-gesture" style="font-size: 11px; color: var(--text-secondary);">--</span>
+                </div>
+                <div class="progress-bar" style="margin-top: 4px;"><div id="meter-right-pinch" class="progress-fill" style="background: var(--accent-green);"></div></div>
+                <div class="feature-value">Pinch: <span id="val-right-pinch">0.00</span></div>
+              </div>
             </div>
           </div>
         </div>
@@ -2144,11 +2191,29 @@
           const img = document.getElementById("cameraFeed");
           img.src = "data:image/jpeg;base64," + msg.frame;
 
-          // Update facial features (only mouth, roll, smile)
-          const features = msg.features;
+          // Update facial features
+          const features = msg.features || {};
           updateFeatureMeter("mouth", features.mouth_openness || 0);
+          // Invert smile: high value = smiling, low value = neutral
+          const smileInverted = 1 - (features.smile_curvature || 0);
+          updateFeatureMeter("smile", smileInverted);
           updateFeatureMeter("roll", (features.head_roll || 0) / 30 + 0.5); // Map -15 to 15 -> 0 to 1
-          updateFeatureMeter("smile", features.smile_curvature || 0);
+
+          // Update eye gaze
+          const gaze = msg.gaze || {};
+          if (gaze.gaze_x !== undefined) {
+            updateFeatureMeter("gaze-x", (gaze.gaze_x + 1) / 2); // Map -1 to 1 -> 0 to 1
+            document.getElementById("val-gaze-x").textContent = gaze.gaze_x.toFixed(2);
+          }
+          if (gaze.gaze_y !== undefined) {
+            updateFeatureMeter("gaze-y", (gaze.gaze_y + 1) / 2); // Map -1 to 1 -> 0 to 1
+            document.getElementById("val-gaze-y").textContent = gaze.gaze_y.toFixed(2);
+          }
+
+          // Update hands
+          const hands = msg.hands || {};
+          updateHandDisplay("left", hands.left);
+          updateHandDisplay("right", hands.right);
 
           // Feed camera data to Sketch
           if (typeof Sketch !== 'undefined') {
@@ -2157,7 +2222,7 @@
 
           // Feed CV data to Audio Engine
           if (typeof updateAudioWithCVData === 'function') {
-            updateAudioWithCVData(features, msg.gaze, msg.ppg);
+            updateAudioWithCVData(features, gaze);
           }
         } else if (msg.type === "error") {
           errorMsg.textContent = msg.message || "Camera error.";
@@ -2194,6 +2259,42 @@
       }
       if (valueSpan) {
         valueSpan.textContent = value.toFixed(2);
+      }
+    }
+
+    function updateHandDisplay(side, handData) {
+      const statusEl = document.getElementById(`${side}-hand-status`);
+      const gestureEl = document.getElementById(`${side}-hand-gesture`);
+      const pinchMeter = document.getElementById(`meter-${side}-pinch`);
+      const pinchVal = document.getElementById(`val-${side}-pinch`);
+
+      if (!handData || !handData.present) {
+        if (statusEl) {
+          statusEl.textContent = "Not detected";
+          statusEl.style.background = "var(--bg-tertiary)";
+        }
+        if (gestureEl) gestureEl.textContent = "--";
+        if (pinchMeter) pinchMeter.style.width = "0%";
+        if (pinchVal) pinchVal.textContent = "0.00";
+        return;
+      }
+
+      // Hand detected
+      if (statusEl) {
+        statusEl.textContent = "Detected";
+        statusEl.style.background = "var(--accent-green)";
+      }
+
+      // Gesture
+      if (gestureEl && handData.gesture) {
+        gestureEl.textContent = handData.gesture;
+      }
+
+      // Pinch distance (normalize 0-100 to 0-1)
+      if (handData.pinch_distance !== undefined) {
+        const pinchNorm = Math.max(0, Math.min(1, 1 - handData.pinch_distance / 100));
+        if (pinchMeter) pinchMeter.style.width = `${pinchNorm * 100}%`;
+        if (pinchVal) pinchVal.textContent = pinchNorm.toFixed(2);
       }
     }
 
@@ -2263,6 +2364,18 @@
         const isVisible = aiContent.style.display !== 'none';
         aiContent.style.display = isVisible ? 'none' : 'flex';
         aiToggleIcon.textContent = isVisible ? '▶' : '▼';
+      });
+    }
+
+    // CV Features section collapse toggle
+    const cvFeaturesToggle = document.getElementById('cv-features-toggle');
+    const cvFeaturesContent = document.getElementById('cv-features-content');
+    const cvFeaturesArrow = document.getElementById('cv-features-arrow');
+    if (cvFeaturesToggle && cvFeaturesContent && cvFeaturesArrow) {
+      cvFeaturesToggle.addEventListener('click', () => {
+        const isVisible = cvFeaturesContent.style.display !== 'none';
+        cvFeaturesContent.style.display = isVisible ? 'none' : 'block';
+        cvFeaturesArrow.textContent = isVisible ? '▶' : '▼';
       });
     }
 
@@ -2680,25 +2793,20 @@
     };
 
     // Feed CV data to audio engine
-    function updateAudioWithCVData(features, gaze, ppg) {
+    function updateAudioWithCVData(features, gaze) {
       if (!audioEnabled || typeof AudioEngine === 'undefined') return;
 
       if (features) {
         AudioEngine.updateData('cv', {
           mouth: features.mouth_openness || 0,
-          brow: features.brow_raise || 0,
           yaw: features.head_yaw || 0,
           roll: features.head_roll_relative || 0,
-          smile: features.smile_curvature || 0
+          smile: 1 - (features.smile_curvature || 0) // Inverted: high = smiling
         });
       }
 
       if (gaze) {
         AudioEngine.updateData('gaze', gaze);
-      }
-
-      if (ppg && ppg.heart_rate) {
-        AudioEngine.updateData('heart_rate', ppg.heart_rate);
       }
     }
   </script>

@@ -25,16 +25,6 @@ except Exception as e:
     camera_service = None
     CAMERA_AVAILABLE = False
 
-# Import PPG service for heart rate
-try:
-    from ppg_service import PPGExtractor
-    ppg_extractor = PPGExtractor()
-    PPG_AVAILABLE = True
-except Exception as e:
-    print(f"[WARNING] PPG service unavailable: {e}")
-    ppg_extractor = None
-    PPG_AVAILABLE = False
-
 # Import session recorder
 try:
     from session_recorder import SessionRecorder
@@ -444,33 +434,6 @@ async def api_artifacts_config(payload: dict):
     return {"status": "ok", "enabled": enabled}
 
 
-# -------- PPG / Heart Rate API --------
-
-@app.post("/api/ppg/start")
-async def api_ppg_start():
-    """Start PPG (heart rate) analysis from camera feed"""
-    if not PPG_AVAILABLE or ppg_extractor is None:
-        return JSONResponse(
-            {"status": "error", "message": "PPG service unavailable"},
-            status_code=503
-        )
-    if not CAMERA_AVAILABLE or camera_service is None or not camera_service.streaming:
-        return JSONResponse(
-            {"status": "error", "message": "Camera must be running for PPG"},
-            status_code=400
-        )
-    return {"status": "ok", "message": "PPG analysis started"}
-
-
-@app.get("/api/ppg/features")
-async def api_ppg_features():
-    """Get current heart rate and HRV data"""
-    if not PPG_AVAILABLE or ppg_extractor is None:
-        return {"heart_rate": 0, "hrv": 0, "quality": 0}
-
-    return ppg_extractor.get_latest()
-
-
 # -------- MIDI API --------
 
 @app.get("/api/midi/ports")
@@ -778,26 +741,18 @@ async def ws_camera(ws: WebSocket):
             gaze = camera_service.get_latest_gaze() if hasattr(camera_service, 'get_latest_gaze') else {}
             hands = camera_service.get_latest_hands() if hasattr(camera_service, 'get_latest_hands') else {}
 
-            # Get PPG data if available
-            ppg_data = {}
-            if PPG_AVAILABLE and ppg_extractor:
-                ppg_data = ppg_extractor.get_latest()
-
             if frame_base64:
                 await ws.send_json({
                     "type": "camera",
                     "frame": frame_base64,
                     "features": features,
                     "gaze": gaze,
-                    "hands": hands,
-                    "ppg": ppg_data
+                    "hands": hands
                 })
 
                 # Send CV features via MIDI if connected
                 if MIDI_AVAILABLE and midi_sender and midi_sender.is_connected():
                     midi_sender.send_cv_features(features)
-                    if ppg_data.get("heart_rate"):
-                        midi_sender.send_heart_rate(ppg_data["heart_rate"])
                     # Send gestures as MIDI notes
                     if hands.get("left", {}).get("gesture"):
                         midi_sender.send_gesture(hands["left"]["gesture"], "left")
@@ -807,12 +762,6 @@ async def ws_camera(ws: WebSocket):
                 # Record CV data if recording
                 if RECORDING_AVAILABLE and session_recorder and session_recorder.is_recording():
                     session_recorder.record_cv(features, gaze, hands)
-                    if ppg_data:
-                        session_recorder.record_ppg(
-                            heart_rate=ppg_data.get("heart_rate", 0),
-                            hrv=ppg_data.get("hrv", 0),
-                            quality=ppg_data.get("quality", 0)
-                        )
 
             await asyncio.sleep(1/30)  # 30 FPS
 

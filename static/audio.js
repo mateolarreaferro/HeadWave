@@ -22,10 +22,9 @@ const AudioEngine = {
   // Data sources
   data: {
     bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 },
-    cv: { mouth: 0, brow: 0, yaw: 0, roll: 0, smile: 0 },
+    cv: { mouth: 0, yaw: 0, roll: 0, smile: 0 },
     gaze: { x: 0, y: 0 },
     hands: { left: null, right: null },
-    heart_rate: 0,
     engagement: 0
   },
 
@@ -123,8 +122,29 @@ const AudioEngine = {
       inputs: [],
       outputs: ['signal'],
       params: {
-        feature: { default: 'mouth', options: ['mouth', 'brow', 'yaw', 'roll', 'smile', 'gaze_x', 'gaze_y', 'heart_rate', 'engagement'] },
+        feature: { default: 'mouth', options: ['mouth', 'yaw', 'roll', 'smile', 'gaze_x', 'gaze_y', 'engagement'] },
         smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+    handFeature: {
+      name: 'Hand Feature',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['signal'],
+      params: {
+        hand: { default: 'left', options: ['left', 'right'] },
+        feature: { default: 'pinch', options: ['pinch', 'openness', 'x', 'y', 'z'] },
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+    scale: {
+      name: 'Range',
+      category: 'processor',
+      inputs: ['signal'],
+      outputs: ['signal'],
+      params: {
+        min: { default: 200, min: 0, max: 20000 },
+        max: { default: 800, min: 0, max: 20000 }
       }
     },
 
@@ -288,6 +308,10 @@ const AudioEngine = {
         lfo.frequency.value = params.rate;
         lfo.start();
         return lfo;
+
+      case 'scale':
+        // Scale/Range node - no audio node needed, handles signal mapping
+        return null;
 
       case 'output':
         return this.masterGain;
@@ -485,8 +509,6 @@ const AudioEngine = {
       this.data.gaze = values;
     } else if (dataType === 'hands') {
       this.data.hands = values;
-    } else if (dataType === 'heart_rate') {
-      this.data.heart_rate = values;
     } else if (dataType === 'engagement') {
       this.data.engagement = values;
     }
@@ -497,23 +519,56 @@ const AudioEngine = {
 
   // Update modulator nodes with current data
   _updateModulators: function() {
+    // Step 1: Update all source modulators with 0-1 values
     for (const [id, node] of Object.entries(this.nodes)) {
       if (node.type === 'eegBand') {
         const band = node.params.band;
         const value = this.data.bands[band] || 0;
-        // Normalize 0-100 to 0-1
-        node.outputValue = value / 100;
-        this._applyModulation(node);
+        node.outputValue = value / 100; // Normalize 0-100 to 0-1
       } else if (node.type === 'cvFeature') {
         const feature = node.params.feature;
         let value = 0;
         if (feature === 'gaze_x') value = (this.data.gaze.x + 1) / 2;
         else if (feature === 'gaze_y') value = (this.data.gaze.y + 1) / 2;
-        else if (feature === 'heart_rate') value = Math.min(this.data.heart_rate / 200, 1);
         else if (feature === 'engagement') value = Math.min(this.data.engagement / 5, 1);
         else value = this.data.cv[feature] || 0;
-
         node.outputValue = value;
+      } else if (node.type === 'handFeature') {
+        const hand = node.params.hand;
+        const feature = node.params.feature;
+        let value = 0;
+        const handData = this.data.hands[hand];
+        if (handData && handData.detected) {
+          if (feature === 'pinch') value = handData.pinch_distance || 0;
+          else if (feature === 'openness') value = handData.openness || 0;
+          else if (feature === 'x') value = handData.palm_x || 0.5;
+          else if (feature === 'y') value = handData.palm_y || 0.5;
+          else if (feature === 'z') value = Math.min(Math.max(handData.palm_z || 0, 0), 1);
+        }
+        node.outputValue = value;
+      }
+    }
+
+    // Step 2: Propagate through scale/range nodes
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.type === 'scale') {
+        // Find input connection to this scale node
+        const inputConn = this.connections.find(c => c.toNode === id);
+        if (inputConn) {
+          const sourceNode = this.nodes[inputConn.fromNode];
+          if (sourceNode && sourceNode.outputValue !== undefined) {
+            // Map 0-1 to min-max range
+            const min = node.params.min;
+            const max = node.params.max;
+            node.outputValue = min + sourceNode.outputValue * (max - min);
+          }
+        }
+      }
+    }
+
+    // Step 3: Apply all modulations to targets
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.outputValue !== undefined) {
         this._applyModulation(node);
       }
     }
@@ -525,20 +580,34 @@ const AudioEngine = {
 
     for (const conn of connections) {
       const targetNode = this.nodes[conn.toNode];
-      if (!targetNode?.audioNode) continue;
+      if (!targetNode) continue;
+
+      // Skip if target is a scale node (handled in step 2)
+      if (targetNode.type === 'scale') continue;
+
+      // Skip if target has no audio node
+      if (!targetNode.audioNode) continue;
 
       const value = modulatorNode.outputValue;
       const input = conn.toInput;
 
-      // Scale value based on target parameter
+      // Apply value to target parameter
+      // If source is a Range node, value is already in the correct range
+      // If source is a raw modulator (0-1), apply default scaling
+      const isFromRange = modulatorNode.type === 'scale';
+
       if (input === 'frequency') {
-        const scaled = 100 + value * 2000; // 100-2100 Hz
-        targetNode.audioNode.frequency?.setValueAtTime(scaled, this.ctx.currentTime);
+        const freq = isFromRange ? value : (100 + value * 2000);
+        targetNode.audioNode.frequency?.setValueAtTime(freq, this.ctx.currentTime);
       } else if (input === 'gain') {
-        targetNode.audioNode.gain?.setValueAtTime(value, this.ctx.currentTime);
+        const gain = isFromRange ? (value / 1000) : value; // Scale down if from range
+        targetNode.audioNode.gain?.setValueAtTime(Math.min(gain, 2), this.ctx.currentTime);
       } else if (input === 'Q') {
-        const scaled = 0.5 + value * 10;
-        targetNode.audioNode.Q?.setValueAtTime(scaled, this.ctx.currentTime);
+        const q = isFromRange ? value : (0.5 + value * 10);
+        targetNode.audioNode.Q?.setValueAtTime(q, this.ctx.currentTime);
+      } else if (input === 'detune') {
+        const detune = isFromRange ? value : (value * 1200 - 600);
+        targetNode.audioNode.detune?.setValueAtTime(detune, this.ctx.currentTime);
       }
     }
   },
