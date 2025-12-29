@@ -5,9 +5,35 @@ Generates realistic brain wave patterns for debugging without hardware
 """
 import threading
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional
 import numpy as np
 from collections import deque
+
+
+class SmoothingBuffer:
+    """Exponential moving average buffer for smoothing data streams"""
+
+    def __init__(self, alpha: float = 0.3, num_values: int = 5):
+        self.alpha = alpha
+        self.smoothed_values: List[Optional[float]] = [None] * num_values
+        self.enabled = True
+
+    def update(self, values: List[float]) -> List[float]:
+        if not self.enabled:
+            return values
+        result = []
+        for i, val in enumerate(values):
+            if i >= len(self.smoothed_values):
+                self.smoothed_values.append(None)
+            if self.smoothed_values[i] is None:
+                self.smoothed_values[i] = val
+            else:
+                self.smoothed_values[i] = self.alpha * val + (1 - self.alpha) * self.smoothed_values[i]
+            result.append(self.smoothed_values[i])
+        return result
+
+    def reset(self):
+        self.smoothed_values = [None] * len(self.smoothed_values)
 
 
 class SimulatorService:
@@ -19,7 +45,7 @@ class SimulatorService:
     def __init__(self, sampling_rate: int = 200, num_channels: int = 4):
         """
         Initialize simulator
-        
+
         Args:
             sampling_rate: Samples per second (Ganglion default is 200 Hz)
             num_channels: Number of EEG channels (Ganglion has 4)
@@ -28,25 +54,45 @@ class SimulatorService:
         self.num_channels = num_channels
         self.connected = False
         self.streaming = False
-        
+
         # Data buffer
         self.buffer = deque(maxlen=50000)  # Store up to 250 seconds at 200 Hz
         self.lock = threading.Lock()
-        
+
         # Generation thread
         self.thread = None
         self.running = False
-        
+
         # Simulation state
         self.time_elapsed = 0.0
         self.mode = "normal"  # normal, meditation, focused, drowsy
-        
+
         # Brain wave frequencies (Hz)
         self.DELTA = (0.5, 4.0)    # Deep sleep
         self.THETA = (4.0, 8.0)     # Drowsiness, meditation
         self.ALPHA = (8.0, 13.0)    # Relaxed, calm
         self.BETA = (13.0, 30.0)    # Active thinking, focus
         self.GAMMA = (30.0, 50.0)   # High-level cognition
+
+        # Smoothing configuration
+        self.smoothing_alpha = 0.3
+        self.smoothing_enabled = True
+        self.band_smoothers: Dict[str, SmoothingBuffer] = {}
+        self.engagement_smoother = SmoothingBuffer(alpha=0.2, num_values=4)
+
+    def configure_smoothing(self, enabled: bool, alpha: float = 0.3):
+        """Configure smoothing parameters"""
+        self.smoothing_enabled = enabled
+        self.smoothing_alpha = max(0.05, min(1.0, alpha))
+        for smoother in self.band_smoothers.values():
+            smoother.enabled = enabled
+            smoother.alpha = self.smoothing_alpha
+        self.engagement_smoother.enabled = enabled
+        self.engagement_smoother.alpha = self.smoothing_alpha
+
+    def configure_artifact_detection(self, enabled: bool, **kwargs):
+        """Stub for API compatibility - simulator doesn't generate artifacts"""
+        pass
         
     def connect(self):
         """Simulate connection"""
@@ -315,8 +361,9 @@ class SimulatorService:
     def get_band_powers(
         self,
         window_sec: float = 4.0,
-        bands = None,
+        bands=None,
         use_relative: bool = True,
+        apply_smoothing: bool = True,
     ):
         """
         Returns (channel_names, band_names, band_values[channels][bands])
@@ -329,40 +376,40 @@ class SimulatorService:
                 ("beta", 13.0, 30.0),
                 ("gamma", 30.0, 40.0),
             ]
-        
+
         if not (self.connected and self.streaming):
             return [], [b[0] for b in bands], []
-        
+
         n_samples = int(window_sec * self.sampling_rate)
         data = self.get_board_data(n_samples)
-        
+
         if data.shape[1] == 0:
             return [], [b[0] for b in bands], []
-        
+
         band_names = [b[0] for b in bands]
         channel_names = [f"CH{idx+1}" for idx in range(self.num_channels)]
         all_band_vals = []
-        
+
         for ch_idx in range(self.num_channels):
+            ch_name = f"CH{ch_idx+1}"
             sig = data[ch_idx + 1, :]  # +1 to skip timestamp
-            
+
             if sig.size < 32:
                 all_band_vals.append([0.0] * len(bands))
                 continue
-            
+
             # Calculate FFT
             fft_result = np.fft.rfft(sig)
             psd = np.abs(fft_result) ** 2 / len(sig)
             freqs = np.fft.rfftfreq(len(sig), 1.0 / self.sampling_rate)
-            
+
             # Calculate band powers
             ch_band_vals = []
             for _, fmin, fmax in bands:
-                # Find indices for this frequency band
                 band_mask = (freqs >= fmin) & (freqs < fmax)
                 band_power = np.sum(psd[band_mask])
                 ch_band_vals.append(float(band_power))
-            
+
             # Convert to relative power (percentage) if requested
             if use_relative:
                 total_power = sum(ch_band_vals)
@@ -370,7 +417,74 @@ class SimulatorService:
                     ch_band_vals = [(bp / total_power) * 100 for bp in ch_band_vals]
                 else:
                     ch_band_vals = [0.0] * len(bands)
-            
+
+            # Apply smoothing if enabled
+            if apply_smoothing and self.smoothing_enabled:
+                if ch_name not in self.band_smoothers:
+                    self.band_smoothers[ch_name] = SmoothingBuffer(
+                        alpha=self.smoothing_alpha, num_values=len(bands)
+                    )
+                ch_band_vals = self.band_smoothers[ch_name].update(ch_band_vals)
+
             all_band_vals.append(ch_band_vals)
-        
+
         return channel_names, band_names, all_band_vals
+
+    def get_band_powers_with_artifacts(
+        self,
+        window_sec: float = 4.0,
+        bands=None,
+        use_relative: bool = True,
+    ):
+        """
+        Returns band powers with artifact info (simulator always returns clean).
+        Returns: (channel_names, band_names, band_values, artifact_flags, signal_quality)
+        """
+        channels, band_names, values = self.get_band_powers(
+            window_sec=window_sec, bands=bands, use_relative=use_relative
+        )
+        # Simulator generates clean data - no artifacts
+        artifact_flags = [False] * len(channels)
+        signal_quality = [1.0] * len(channels)
+        return channels, band_names, values, artifact_flags, signal_quality
+
+    def get_engagement_index(
+        self,
+        window_sec: float = 4.0,
+    ):
+        """
+        Calculate engagement index: Beta / (Alpha + Theta)
+        Returns: (channel_names, per_channel_values, cross_channel_average)
+        """
+        if not (self.connected and self.streaming):
+            return [], [], 0.0
+
+        channels, band_names, values = self.get_band_powers(
+            window_sec=window_sec,
+            use_relative=False,
+            apply_smoothing=False
+        )
+
+        if not channels or not values:
+            return [], [], 0.0
+
+        engagement_values = []
+        for ch_bands in values:
+            if len(ch_bands) < 5:
+                engagement_values.append(0.0)
+                continue
+
+            theta = ch_bands[1]
+            alpha = ch_bands[2]
+            beta = ch_bands[3]
+
+            denominator = alpha + theta + 0.001
+            engagement = beta / denominator
+            engagement = max(0.0, min(5.0, engagement))
+            engagement_values.append(engagement)
+
+        if self.smoothing_enabled:
+            engagement_values = self.engagement_smoother.update(engagement_values)
+
+        avg_engagement = float(np.mean(engagement_values)) if engagement_values else 0.0
+        return channels, engagement_values, avg_engagement

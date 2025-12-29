@@ -1,0 +1,613 @@
+// audio.js - Web Audio Synthesis Engine for HeadWave
+// Modular routing system with EEG/CV integration
+
+const AudioEngine = {
+  // Audio context
+  ctx: null,
+  masterGain: null,
+  analyzer: null,
+
+  // State
+  initialized: false,
+  muted: false,
+  masterVolume: 0.5,
+
+  // Active nodes
+  nodes: {},
+  nodeCounter: 0,
+
+  // Connections
+  connections: [],
+
+  // Data sources
+  data: {
+    bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 },
+    cv: { mouth: 0, brow: 0, yaw: 0, roll: 0, smile: 0 },
+    gaze: { x: 0, y: 0 },
+    hands: { left: null, right: null },
+    heart_rate: 0,
+    engagement: 0
+  },
+
+  // Node type definitions
+  nodeTypes: {
+    // Sources
+    oscillator: {
+      name: 'Oscillator',
+      category: 'source',
+      inputs: ['frequency', 'detune'],
+      outputs: ['audio'],
+      params: {
+        type: { default: 'sine', options: ['sine', 'square', 'sawtooth', 'triangle'] },
+        frequency: { default: 440, min: 20, max: 2000 },
+        detune: { default: 0, min: -1200, max: 1200 }
+      }
+    },
+    noise: {
+      name: 'Noise',
+      category: 'source',
+      inputs: [],
+      outputs: ['audio'],
+      params: {
+        type: { default: 'white', options: ['white', 'pink', 'brown'] }
+      }
+    },
+
+    // Processors
+    filter: {
+      name: 'Filter',
+      category: 'processor',
+      inputs: ['audio', 'frequency', 'Q'],
+      outputs: ['audio'],
+      params: {
+        type: { default: 'lowpass', options: ['lowpass', 'highpass', 'bandpass', 'notch'] },
+        frequency: { default: 1000, min: 20, max: 20000 },
+        Q: { default: 1, min: 0.1, max: 20 }
+      }
+    },
+    gain: {
+      name: 'Gain',
+      category: 'processor',
+      inputs: ['audio', 'gain'],
+      outputs: ['audio'],
+      params: {
+        gain: { default: 0.5, min: 0, max: 2 }
+      }
+    },
+    delay: {
+      name: 'Delay',
+      category: 'processor',
+      inputs: ['audio', 'time'],
+      outputs: ['audio'],
+      params: {
+        time: { default: 0.3, min: 0, max: 2 },
+        feedback: { default: 0.3, min: 0, max: 0.95 }
+      }
+    },
+    reverb: {
+      name: 'Reverb',
+      category: 'processor',
+      inputs: ['audio'],
+      outputs: ['audio'],
+      params: {
+        decay: { default: 2, min: 0.1, max: 10 },
+        wet: { default: 0.3, min: 0, max: 1 }
+      }
+    },
+
+    // Modulators
+    lfo: {
+      name: 'LFO',
+      category: 'modulator',
+      inputs: ['rate'],
+      outputs: ['signal'],
+      params: {
+        type: { default: 'sine', options: ['sine', 'square', 'sawtooth', 'triangle'] },
+        rate: { default: 1, min: 0.01, max: 20 },
+        depth: { default: 1, min: 0, max: 1 }
+      }
+    },
+    eegBand: {
+      name: 'EEG Band',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['signal'],
+      params: {
+        band: { default: 'alpha', options: ['delta', 'theta', 'alpha', 'beta', 'gamma'] },
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+    cvFeature: {
+      name: 'CV Feature',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['signal'],
+      params: {
+        feature: { default: 'mouth', options: ['mouth', 'brow', 'yaw', 'roll', 'smile', 'gaze_x', 'gaze_y', 'heart_rate', 'engagement'] },
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+
+    // Output
+    output: {
+      name: 'Output',
+      category: 'output',
+      inputs: ['audio'],
+      outputs: [],
+      params: {}
+    }
+  },
+
+  // Initialize the audio engine
+  init: function() {
+    if (this.initialized) return true;
+
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Master gain
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = this.masterVolume;
+      this.masterGain.connect(this.ctx.destination);
+
+      // Analyzer for visualization
+      this.analyzer = this.ctx.createAnalyser();
+      this.analyzer.fftSize = 256;
+      this.masterGain.connect(this.analyzer);
+
+      this.initialized = true;
+      return true;
+    } catch (e) {
+      console.error('[AudioEngine] Failed to initialize:', e);
+      return false;
+    }
+  },
+
+  // Resume audio context (needed after user interaction)
+  resume: function() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  },
+
+  // Start the audio engine (called when Enable Audio is checked)
+  start: function() {
+    if (!this.initialized) {
+      this.init();
+    }
+    this.resume();
+    this.muted = false;
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(this.masterVolume, this.ctx.currentTime);
+    }
+  },
+
+  // Stop the audio engine
+  stop: function() {
+    this.muted = true;
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
+    }
+  },
+
+  // Set master volume (alias for setVolume)
+  setMasterVolume: function(value) {
+    this.setVolume(value);
+  },
+
+  // Set master volume
+  setVolume: function(value) {
+    this.masterVolume = Math.max(0, Math.min(1, value));
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(this.muted ? 0 : this.masterVolume, this.ctx.currentTime);
+    }
+  },
+
+  // Toggle mute
+  toggleMute: function() {
+    this.muted = !this.muted;
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(this.muted ? 0 : this.masterVolume, this.ctx.currentTime);
+    }
+    return this.muted;
+  },
+
+  // Create a node
+  createNode: function(type, x = 100, y = 100) {
+    // Auto-initialize if needed
+    if (!this.initialized) {
+      this.init();
+    }
+
+    if (!this.nodeTypes[type]) {
+      return null;
+    }
+
+    const id = `node_${++this.nodeCounter}`;
+    const nodeType = this.nodeTypes[type];
+
+    const node = {
+      id: id,
+      type: type,
+      x: x,
+      y: y,
+      params: {},
+      audioNode: null,
+      inputNodes: {},
+      outputValue: 0
+    };
+
+    // Initialize params with defaults
+    for (const [param, config] of Object.entries(nodeType.params)) {
+      node.params[param] = config.default;
+    }
+
+    // Create Web Audio node
+    node.audioNode = this._createAudioNode(type, node.params);
+
+    this.nodes[id] = node;
+    return node;
+  },
+
+  // Create the underlying Web Audio node
+  _createAudioNode: function(type, params) {
+    if (!this.ctx) return null;
+
+    switch (type) {
+      case 'oscillator':
+        const osc = this.ctx.createOscillator();
+        osc.type = params.type;
+        osc.frequency.value = params.frequency;
+        osc.detune.value = params.detune;
+        osc.start();
+        return osc;
+
+      case 'noise':
+        return this._createNoiseNode(params.type);
+
+      case 'filter':
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = params.type;
+        filter.frequency.value = params.frequency;
+        filter.Q.value = params.Q;
+        return filter;
+
+      case 'gain':
+        const gain = this.ctx.createGain();
+        gain.gain.value = params.gain;
+        return gain;
+
+      case 'delay':
+        const delay = this.ctx.createDelay(5);
+        delay.delayTime.value = params.time;
+        return delay;
+
+      case 'lfo':
+        const lfo = this.ctx.createOscillator();
+        lfo.type = params.type;
+        lfo.frequency.value = params.rate;
+        lfo.start();
+        return lfo;
+
+      case 'output':
+        return this.masterGain;
+
+      default:
+        return null;
+    }
+  },
+
+  // Create noise generator
+  _createNoiseNode: function(type) {
+    const bufferSize = 2 * this.ctx.sampleRate;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    if (type === 'white') {
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+    } else if (type === 'pink') {
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        b6 = white * 0.115926;
+      }
+    } else { // brown
+      let last = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        data[i] = (last + 0.02 * white) / 1.02;
+        last = data[i];
+        data[i] *= 3.5;
+      }
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    noise.loop = true;
+    noise.start();
+    return noise;
+  },
+
+  // Delete a node
+  deleteNode: function(id) {
+    const node = this.nodes[id];
+    if (!node) return;
+
+    // Disconnect all connections involving this node
+    this.connections = this.connections.filter(conn => {
+      if (conn.fromNode === id || conn.toNode === id) {
+        this._disconnectNodes(conn.fromNode, conn.toNode);
+        return false;
+      }
+      return true;
+    });
+
+    // Stop and disconnect audio node
+    if (node.audioNode) {
+      if (node.audioNode.stop) {
+        try { node.audioNode.stop(); } catch (e) {}
+      }
+      if (node.audioNode.disconnect) {
+        node.audioNode.disconnect();
+      }
+    }
+
+    delete this.nodes[id];
+  },
+
+  // Connect two nodes
+  connect: function(fromNodeId, fromOutput, toNodeId, toInput) {
+    const fromNode = this.nodes[fromNodeId];
+    const toNode = this.nodes[toNodeId];
+
+    if (!fromNode || !toNode) {
+      return false;
+    }
+
+    // Check if connection already exists
+    const exists = this.connections.some(c =>
+      c.fromNode === fromNodeId && c.toNode === toNodeId &&
+      c.fromOutput === fromOutput && c.toInput === toInput
+    );
+    if (exists) return false;
+
+    // Make audio connection
+    if (fromNode.audioNode && toNode.audioNode) {
+      try {
+        if (toInput === 'audio') {
+          fromNode.audioNode.connect(toNode.audioNode);
+        } else if (toInput === 'frequency' && toNode.audioNode.frequency) {
+          fromNode.audioNode.connect(toNode.audioNode.frequency);
+        } else if (toInput === 'gain' && toNode.audioNode.gain) {
+          fromNode.audioNode.connect(toNode.audioNode.gain);
+        } else if (toInput === 'Q' && toNode.audioNode.Q) {
+          fromNode.audioNode.connect(toNode.audioNode.Q);
+        }
+      } catch (e) {
+        return false;
+      }
+    }
+
+    this.connections.push({
+      fromNode: fromNodeId,
+      fromOutput: fromOutput,
+      toNode: toNodeId,
+      toInput: toInput
+    });
+
+    return true;
+  },
+
+  // Disconnect nodes
+  disconnect: function(fromNodeId, toNodeId) {
+    this._disconnectNodes(fromNodeId, toNodeId);
+    this.connections = this.connections.filter(c =>
+      !(c.fromNode === fromNodeId && c.toNode === toNodeId)
+    );
+  },
+
+  _disconnectNodes: function(fromNodeId, toNodeId) {
+    const fromNode = this.nodes[fromNodeId];
+    const toNode = this.nodes[toNodeId];
+
+    if (fromNode?.audioNode && toNode?.audioNode) {
+      try {
+        fromNode.audioNode.disconnect(toNode.audioNode);
+      } catch (e) {}
+    }
+  },
+
+  // Update node parameter
+  setParam: function(nodeId, param, value) {
+    const node = this.nodes[nodeId];
+    if (!node) return;
+
+    node.params[param] = value;
+
+    // Update audio node
+    if (node.audioNode) {
+      switch (param) {
+        case 'frequency':
+          if (node.audioNode.frequency) {
+            node.audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+        case 'gain':
+          if (node.audioNode.gain) {
+            node.audioNode.gain.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+        case 'Q':
+          if (node.audioNode.Q) {
+            node.audioNode.Q.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+        case 'detune':
+          if (node.audioNode.detune) {
+            node.audioNode.detune.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+        case 'type':
+          if (node.audioNode.type !== undefined) {
+            node.audioNode.type = value;
+          }
+          break;
+        case 'time':
+          if (node.audioNode.delayTime) {
+            node.audioNode.delayTime.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+        case 'rate':
+          if (node.audioNode.frequency) {
+            node.audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+      }
+    }
+  },
+
+  // Update data from EEG/CV
+  updateData: function(dataType, values) {
+    if (dataType === 'bands') {
+      this.data.bands = { ...this.data.bands, ...values };
+    } else if (dataType === 'cv') {
+      this.data.cv = { ...this.data.cv, ...values };
+    } else if (dataType === 'gaze') {
+      this.data.gaze = values;
+    } else if (dataType === 'hands') {
+      this.data.hands = values;
+    } else if (dataType === 'heart_rate') {
+      this.data.heart_rate = values;
+    } else if (dataType === 'engagement') {
+      this.data.engagement = values;
+    }
+
+    // Update EEG/CV modulator nodes
+    this._updateModulators();
+  },
+
+  // Update modulator nodes with current data
+  _updateModulators: function() {
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.type === 'eegBand') {
+        const band = node.params.band;
+        const value = this.data.bands[band] || 0;
+        // Normalize 0-100 to 0-1
+        node.outputValue = value / 100;
+        this._applyModulation(node);
+      } else if (node.type === 'cvFeature') {
+        const feature = node.params.feature;
+        let value = 0;
+        if (feature === 'gaze_x') value = (this.data.gaze.x + 1) / 2;
+        else if (feature === 'gaze_y') value = (this.data.gaze.y + 1) / 2;
+        else if (feature === 'heart_rate') value = Math.min(this.data.heart_rate / 200, 1);
+        else if (feature === 'engagement') value = Math.min(this.data.engagement / 5, 1);
+        else value = this.data.cv[feature] || 0;
+
+        node.outputValue = value;
+        this._applyModulation(node);
+      }
+    }
+  },
+
+  // Apply modulation from modulator nodes
+  _applyModulation: function(modulatorNode) {
+    const connections = this.connections.filter(c => c.fromNode === modulatorNode.id);
+
+    for (const conn of connections) {
+      const targetNode = this.nodes[conn.toNode];
+      if (!targetNode?.audioNode) continue;
+
+      const value = modulatorNode.outputValue;
+      const input = conn.toInput;
+
+      // Scale value based on target parameter
+      if (input === 'frequency') {
+        const scaled = 100 + value * 2000; // 100-2100 Hz
+        targetNode.audioNode.frequency?.setValueAtTime(scaled, this.ctx.currentTime);
+      } else if (input === 'gain') {
+        targetNode.audioNode.gain?.setValueAtTime(value, this.ctx.currentTime);
+      } else if (input === 'Q') {
+        const scaled = 0.5 + value * 10;
+        targetNode.audioNode.Q?.setValueAtTime(scaled, this.ctx.currentTime);
+      }
+    }
+  },
+
+  // Get analyzer data for visualization
+  getAnalyzerData: function() {
+    if (!this.analyzer) return null;
+    const data = new Uint8Array(this.analyzer.frequencyBinCount);
+    this.analyzer.getByteFrequencyData(data);
+    return data;
+  },
+
+  // Save patch to JSON
+  savePatch: function(name) {
+    const patch = {
+      name: name,
+      nodes: {},
+      connections: this.connections.slice()
+    };
+
+    for (const [id, node] of Object.entries(this.nodes)) {
+      patch.nodes[id] = {
+        type: node.type,
+        x: node.x,
+        y: node.y,
+        params: { ...node.params }
+      };
+    }
+
+    return patch;
+  },
+
+  // Load patch from JSON
+  loadPatch: function(patch) {
+    // Clear existing
+    for (const id of Object.keys(this.nodes)) {
+      this.deleteNode(id);
+    }
+
+    // Create nodes
+    for (const [id, nodeData] of Object.entries(patch.nodes)) {
+      const node = this.createNode(nodeData.type, nodeData.x, nodeData.y);
+      if (node) {
+        for (const [param, value] of Object.entries(nodeData.params)) {
+          this.setParam(node.id, param, value);
+        }
+      }
+    }
+
+    // Create connections
+    for (const conn of patch.connections) {
+      this.connect(conn.fromNode, conn.fromOutput, conn.toNode, conn.toInput);
+    }
+  },
+
+  // Cleanup
+  destroy: function() {
+    for (const id of Object.keys(this.nodes)) {
+      this.deleteNode(id);
+    }
+    if (this.ctx) {
+      this.ctx.close();
+      this.ctx = null;
+    }
+    this.initialized = false;
+  }
+};
+
+// Export for use
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = AudioEngine;
+}

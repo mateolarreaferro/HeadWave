@@ -2,14 +2,15 @@
 from typing import Optional
 import glob
 import sys
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-
 import asyncio
 import io
+
+import numpy as np
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from openbci_service import GanglionService
 from simulator_service import SimulatorService
@@ -24,7 +25,47 @@ except Exception as e:
     camera_service = None
     CAMERA_AVAILABLE = False
 
-app = FastAPI(title="Ganglion Studio")
+# Import PPG service for heart rate
+try:
+    from ppg_service import PPGExtractor
+    ppg_extractor = PPGExtractor()
+    PPG_AVAILABLE = True
+except Exception as e:
+    print(f"[WARNING] PPG service unavailable: {e}")
+    ppg_extractor = None
+    PPG_AVAILABLE = False
+
+# Import session recorder
+try:
+    from session_recorder import SessionRecorder
+    session_recorder = SessionRecorder()
+    RECORDING_AVAILABLE = True
+except Exception as e:
+    print(f"[WARNING] Session recorder unavailable: {e}")
+    session_recorder = None
+    RECORDING_AVAILABLE = False
+
+# Import MIDI sender
+try:
+    from midi_sender import MIDISender
+    midi_sender = MIDISender()
+    MIDI_AVAILABLE = True
+except Exception as e:
+    print(f"[WARNING] MIDI sender unavailable: {e}")
+    midi_sender = None
+    MIDI_AVAILABLE = False
+
+# Import calibration wizard
+try:
+    from calibration import CalibrationWizard, CurveShaper
+    calibration_wizard = CalibrationWizard()
+    CALIBRATION_AVAILABLE = True
+except Exception as e:
+    print(f"[WARNING] Calibration unavailable: {e}")
+    calibration_wizard = None
+    CALIBRATION_AVAILABLE = False
+
+app = FastAPI(title="HeadWave - Biosignal Creative Platform")
 
 # Static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -352,6 +393,366 @@ async def api_camera_features():
     return {"features": features}
 
 
+# -------- Smoothing & Signal Processing API --------
+
+@app.post("/api/smoothing/config")
+async def api_smoothing_config(payload: dict):
+    """Configure smoothing parameters for EEG data"""
+    active_service = simulator if USE_SIMULATOR else service
+
+    enabled = payload.get("enabled", True)
+    alpha = float(payload.get("alpha", 0.3))
+
+    active_service.configure_smoothing(enabled=enabled, alpha=alpha)
+    return {"status": "ok", "enabled": enabled, "alpha": alpha}
+
+
+@app.get("/api/engagement")
+async def api_engagement():
+    """Get current engagement index (Beta / (Alpha + Theta))"""
+    active_service = simulator if USE_SIMULATOR else service
+
+    if not active_service.streaming:
+        return {"engagement": 0, "channels": [], "values": []}
+
+    try:
+        channels, values = active_service.get_engagement_index()
+        avg = sum(values) / len(values) if values else 0
+        return {
+            "engagement": avg,
+            "channels": channels,
+            "values": values
+        }
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/artifacts/config")
+async def api_artifacts_config(payload: dict):
+    """Configure artifact detection parameters"""
+    active_service = simulator if USE_SIMULATOR else service
+
+    enabled = payload.get("enabled", True)
+    amplitude_threshold = float(payload.get("amplitude_threshold", 100.0))
+    variance_threshold = float(payload.get("variance_threshold", 5.0))
+
+    active_service.configure_artifact_detection(
+        enabled=enabled,
+        amplitude_threshold=amplitude_threshold,
+        variance_threshold=variance_threshold
+    )
+    return {"status": "ok", "enabled": enabled}
+
+
+# -------- PPG / Heart Rate API --------
+
+@app.post("/api/ppg/start")
+async def api_ppg_start():
+    """Start PPG (heart rate) analysis from camera feed"""
+    if not PPG_AVAILABLE or ppg_extractor is None:
+        return JSONResponse(
+            {"status": "error", "message": "PPG service unavailable"},
+            status_code=503
+        )
+    if not CAMERA_AVAILABLE or camera_service is None or not camera_service.streaming:
+        return JSONResponse(
+            {"status": "error", "message": "Camera must be running for PPG"},
+            status_code=400
+        )
+    return {"status": "ok", "message": "PPG analysis started"}
+
+
+@app.get("/api/ppg/features")
+async def api_ppg_features():
+    """Get current heart rate and HRV data"""
+    if not PPG_AVAILABLE or ppg_extractor is None:
+        return {"heart_rate": 0, "hrv": 0, "quality": 0}
+
+    return ppg_extractor.get_latest()
+
+
+# -------- MIDI API --------
+
+@app.get("/api/midi/ports")
+async def api_midi_ports():
+    """List available MIDI output ports"""
+    if not MIDI_AVAILABLE:
+        return {"ports": [], "available": False}
+
+    from midi_sender import MIDISender
+    ports = MIDISender.list_ports()
+    iac_port = MIDISender.find_iac_port()
+
+    return {
+        "ports": ports,
+        "iac_port": iac_port,
+        "available": True
+    }
+
+
+@app.post("/api/midi/connect")
+async def api_midi_connect(payload: dict):
+    """Connect to a MIDI output port"""
+    if not MIDI_AVAILABLE or midi_sender is None:
+        return JSONResponse(
+            {"status": "error", "message": "MIDI not available. Install: pip install mido python-rtmidi"},
+            status_code=503
+        )
+
+    port_name = payload.get("port_name")  # None = auto-detect IAC
+    success = midi_sender.connect(port_name)
+
+    if success:
+        return {"status": "ok", "port": midi_sender.port_name}
+    else:
+        return JSONResponse(
+            {"status": "error", "message": "Failed to connect to MIDI port"},
+            status_code=500
+        )
+
+
+@app.post("/api/midi/disconnect")
+async def api_midi_disconnect():
+    """Disconnect from MIDI port"""
+    if MIDI_AVAILABLE and midi_sender:
+        midi_sender.disconnect()
+    return {"status": "ok"}
+
+
+@app.get("/api/midi/status")
+async def api_midi_status():
+    """Get MIDI connection status"""
+    if not MIDI_AVAILABLE or midi_sender is None:
+        return {"connected": False, "available": False}
+
+    return {
+        "connected": midi_sender.is_connected(),
+        "port": midi_sender.port_name,
+        "available": True
+    }
+
+
+@app.post("/api/midi/mapping")
+async def api_midi_mapping(payload: dict):
+    """Configure MIDI CC mappings"""
+    if not MIDI_AVAILABLE or midi_sender is None:
+        return JSONResponse({"status": "error", "message": "MIDI not available"}, status_code=503)
+
+    band_map = payload.get("bands")
+    cv_map = payload.get("cv")
+    derived_map = payload.get("derived")
+
+    midi_sender.configure_mapping(band_map, cv_map, derived_map)
+    return {"status": "ok", "mapping": midi_sender.get_mapping()}
+
+
+@app.get("/api/midi/mapping")
+async def api_midi_get_mapping():
+    """Get current MIDI CC mappings"""
+    if not MIDI_AVAILABLE or midi_sender is None:
+        return {"mapping": {}}
+
+    return {"mapping": midi_sender.get_mapping()}
+
+
+# -------- Session Recording API --------
+
+@app.post("/api/recording/start")
+async def api_recording_start(payload: dict):
+    """Start session recording"""
+    if not RECORDING_AVAILABLE or session_recorder is None:
+        return JSONResponse(
+            {"status": "error", "message": "Recording not available"},
+            status_code=503
+        )
+
+    metadata = payload.get("metadata", {})
+    session_id = session_recorder.start_recording(metadata)
+    return {"status": "ok", "session_id": session_id}
+
+
+@app.post("/api/recording/stop")
+async def api_recording_stop():
+    """Stop session recording"""
+    if not RECORDING_AVAILABLE or session_recorder is None:
+        return {"status": "ok"}
+
+    summary = session_recorder.stop_recording()
+    return {"status": "ok", "summary": summary}
+
+
+@app.get("/api/recording/status")
+async def api_recording_status():
+    """Get recording status"""
+    if not RECORDING_AVAILABLE or session_recorder is None:
+        return {"recording": False, "available": False}
+
+    return {
+        "recording": session_recorder.is_recording(),
+        "session_id": session_recorder.current_session_id,
+        "duration": session_recorder.get_duration(),
+        "available": True
+    }
+
+
+@app.get("/api/recording/list")
+async def api_recording_list():
+    """List saved recording sessions"""
+    if not RECORDING_AVAILABLE or session_recorder is None:
+        return {"sessions": []}
+
+    sessions = session_recorder.list_sessions()
+    return {"sessions": sessions}
+
+
+@app.get("/api/recording/export/{session_id}")
+async def api_recording_export(session_id: str, format: str = "json", data_type: str = "eeg"):
+    """Export recording session as JSON or CSV"""
+    if not RECORDING_AVAILABLE or session_recorder is None:
+        return JSONResponse(
+            {"status": "error", "message": "Recording not available"},
+            status_code=503
+        )
+
+    try:
+        if format == "csv":
+            files = session_recorder.export_csv(session_id)
+            if not files:
+                return JSONResponse(
+                    {"status": "error", "message": "No data recorded in this session"},
+                    status_code=404
+                )
+            # Try requested data type first, then fall back to first available
+            if data_type in files:
+                filepath = files[data_type]
+                filename = f"session_{session_id}_{data_type}.csv"
+            else:
+                # Return first available file
+                first_type = next(iter(files))
+                filepath = files[first_type]
+                filename = f"session_{session_id}_{first_type}.csv"
+            return FileResponse(
+                filepath,
+                media_type="text/csv",
+                filename=filename
+            )
+        else:
+            filepath = session_recorder.export_json(session_id)
+            return FileResponse(
+                filepath,
+                media_type="application/json",
+                filename=f"session_{session_id}.json"
+            )
+    except Exception as e:
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=404
+        )
+
+
+# -------- Calibration API --------
+
+@app.post("/api/calibration/start")
+async def api_calibration_start(payload: dict):
+    """Start calibration wizard"""
+    if not CALIBRATION_AVAILABLE or calibration_wizard is None:
+        return JSONResponse(
+            {"status": "error", "message": "Calibration not available"},
+            status_code=503
+        )
+
+    profile_name = payload.get("profile_name", "default")
+    step_info = calibration_wizard.start_calibration(profile_name)
+    return {"status": "ok", **step_info}
+
+
+@app.post("/api/calibration/cancel")
+async def api_calibration_cancel():
+    """Cancel calibration"""
+    if CALIBRATION_AVAILABLE and calibration_wizard:
+        calibration_wizard.cancel_calibration()
+    return {"status": "ok"}
+
+
+@app.get("/api/calibration/status")
+async def api_calibration_status():
+    """Get calibration status"""
+    if not CALIBRATION_AVAILABLE or calibration_wizard is None:
+        return {"calibrating": False, "available": False}
+
+    status = calibration_wizard.get_status()
+    return {
+        "calibrating": calibration_wizard.is_calibrating(),
+        "available": True,
+        **status
+    }
+
+
+@app.post("/api/calibration/save")
+async def api_calibration_save():
+    """Save calibration profile"""
+    if not CALIBRATION_AVAILABLE or calibration_wizard is None:
+        return JSONResponse(
+            {"status": "error", "message": "Calibration not available"},
+            status_code=503
+        )
+
+    try:
+        filepath = calibration_wizard.save_profile()
+        return {"status": "ok", "filepath": filepath}
+    except Exception as e:
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=500
+        )
+
+
+@app.get("/api/calibration/profiles")
+async def api_calibration_profiles():
+    """List saved calibration profiles"""
+    if not CALIBRATION_AVAILABLE or calibration_wizard is None:
+        return {"profiles": []}
+
+    profiles = calibration_wizard.list_profiles()
+    return {"profiles": profiles}
+
+
+@app.post("/api/calibration/load")
+async def api_calibration_load(payload: dict):
+    """Load a calibration profile"""
+    if not CALIBRATION_AVAILABLE or calibration_wizard is None:
+        return JSONResponse(
+            {"status": "error", "message": "Calibration not available"},
+            status_code=503
+        )
+
+    profile_name = payload.get("profile_name", "default")
+    try:
+        profile = calibration_wizard.load_profile(profile_name)
+        return {"status": "ok", "profile": profile.__dict__}
+    except FileNotFoundError:
+        return JSONResponse(
+            {"status": "error", "message": f"Profile '{profile_name}' not found"},
+            status_code=404
+        )
+
+
+# -------- Curve Shaping API --------
+
+@app.post("/api/curve/apply")
+async def api_curve_apply(payload: dict):
+    """Apply curve shaping to a value"""
+    value = float(payload.get("value", 0.5))
+    curve_type = payload.get("curve_type", "linear")
+    params = payload.get("params", {})
+
+    if CALIBRATION_AVAILABLE:
+        result = CurveShaper.apply_curve(value, curve_type, **params)
+        return {"status": "ok", "input": value, "output": result, "curve": curve_type}
+    else:
+        return {"status": "ok", "input": value, "output": value, "curve": "linear"}
+
+
 # -------- WebSocket for camera --------
 
 @app.websocket("/ws/camera")
@@ -373,12 +774,45 @@ async def ws_camera(ws: WebSocket):
             frame_base64 = camera_service.get_latest_frame_base64()
             features = camera_service.get_latest_features()
 
+            # Get gaze and hands data if available
+            gaze = camera_service.get_latest_gaze() if hasattr(camera_service, 'get_latest_gaze') else {}
+            hands = camera_service.get_latest_hands() if hasattr(camera_service, 'get_latest_hands') else {}
+
+            # Get PPG data if available
+            ppg_data = {}
+            if PPG_AVAILABLE and ppg_extractor:
+                ppg_data = ppg_extractor.get_latest()
+
             if frame_base64:
                 await ws.send_json({
                     "type": "camera",
                     "frame": frame_base64,
-                    "features": features
+                    "features": features,
+                    "gaze": gaze,
+                    "hands": hands,
+                    "ppg": ppg_data
                 })
+
+                # Send CV features via MIDI if connected
+                if MIDI_AVAILABLE and midi_sender and midi_sender.is_connected():
+                    midi_sender.send_cv_features(features)
+                    if ppg_data.get("heart_rate"):
+                        midi_sender.send_heart_rate(ppg_data["heart_rate"])
+                    # Send gestures as MIDI notes
+                    if hands.get("left", {}).get("gesture"):
+                        midi_sender.send_gesture(hands["left"]["gesture"], "left")
+                    if hands.get("right", {}).get("gesture"):
+                        midi_sender.send_gesture(hands["right"]["gesture"], "right")
+
+                # Record CV data if recording
+                if RECORDING_AVAILABLE and session_recorder and session_recorder.is_recording():
+                    session_recorder.record_cv(features, gaze, hands)
+                    if ppg_data:
+                        session_recorder.record_ppg(
+                            heart_rate=ppg_data.get("heart_rate", 0),
+                            hrv=ppg_data.get("hrv", 0),
+                            quality=ppg_data.get("quality", 0)
+                        )
 
             await asyncio.sleep(1/30)  # 30 FPS
 
@@ -453,14 +887,51 @@ async def ws_stream(ws: WebSocket):
                             # push OSC (only for real service)
                             if not USE_SIMULATOR:
                                 service.osc_push_bands(channels, band_names, values)
+
+                            # Get engagement index
+                            try:
+                                eng_channels, eng_values = active_service.get_engagement_index()
+                                engagement_avg = sum(eng_values) / len(eng_values) if eng_values else 0
+                            except Exception:
+                                eng_channels, eng_values = [], []
+                                engagement_avg = 0
+
+                            # Send bands data with engagement
                             await ws.send_json(
                                 {
                                     "type": "bands",
                                     "channels": channels,
                                     "bands": band_names,
                                     "values": values,
+                                    "engagement": engagement_avg,
+                                    "engagement_channels": eng_values,
                                 }
                             )
+
+                            # Calculate cross-channel averages for MIDI
+                            if MIDI_AVAILABLE and midi_sender and midi_sender.is_connected():
+                                avg_values = [
+                                    float(np.mean([ch[i] for ch in values if i < len(ch)]))
+                                    for i in range(len(band_names))
+                                ]
+                                midi_sender.send_bands(band_names, avg_values)
+                                midi_sender.send_engagement(engagement_avg)
+
+                            # Record data if recording
+                            if RECORDING_AVAILABLE and session_recorder and session_recorder.is_recording():
+                                session_recorder.record_eeg(
+                                    channels=channels,
+                                    bands=band_names,
+                                    values=values
+                                )
+                                # Record engagement separately
+                                if eng_values:
+                                    session_recorder.record_engagement(
+                                        channels=eng_channels if eng_channels else channels,
+                                        values=eng_values,
+                                        average=engagement_avg
+                                    )
+
                         else:
                             # Send empty data to prevent UI freeze
                             await ws.send_json(
@@ -469,12 +940,10 @@ async def ws_stream(ws: WebSocket):
                                     "channels": [],
                                     "bands": band_names if band_names else [],
                                     "values": [],
+                                    "engagement": 0,
                                 }
                             )
                     except Exception as e:
-                        print(f"Error in bands calculation: {e}")
-                        import traceback
-                        traceback.print_exc()
                         await ws.send_json({"type": "error", "message": f"Bands error: {str(e)}"})
 
                 await asyncio.sleep(config["send_interval_ms"] / 1000.0)

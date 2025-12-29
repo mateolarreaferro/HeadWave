@@ -7,6 +7,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
   <script src="/static/sketch.js"></script>
+  <script src="/static/audio.js"></script>
+  <script src="/static/patcher.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -908,6 +910,7 @@
           </div>
         </div>
       </div>
+
     </div>
 
   </aside>
@@ -926,6 +929,7 @@
         <button id="tab-bands" class="mode-tab">Bands</button>
         <button id="tab-camera" class="mode-tab">Camera</button>
         <button id="tab-sketch" class="mode-tab">Sketch</button>
+        <button id="tab-audio" class="mode-tab">Audio</button>
       </div>
     </header>
 
@@ -953,7 +957,7 @@
 
           <div id="sketchView" style="display:none; width: 100%; height: 100%; position: relative;">
             <div id="p5-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div>
-            
+
             <!-- Enhanced Visualization Controls -->
             <div id="viz-controls" style="position: absolute; top: 10px; right: 10px; background: rgba(20, 20, 30, 0.95); padding: 15px; border-radius: 8px; color: white; font-family: -apple-system, sans-serif; font-size: 12px; width: 280px; max-height: calc(100% - 20px); overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3); backdrop-filter: blur(10px); z-index: 100;">
               
@@ -1122,6 +1126,43 @@
               </div>
             </div>
           </div>
+
+          <!-- Audio Patcher View -->
+          <div id="audioView" style="display:none; width: 100%; height: 100%; position: relative; background: #1a1a2e;">
+            <div id="patcher-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div>
+
+            <!-- Audio Controls Overlay -->
+            <div id="audio-controls" style="position: absolute; top: 10px; left: 10px; background: rgba(20, 20, 30, 0.95); padding: 12px; border-radius: 8px; color: white; font-family: -apple-system, sans-serif; font-size: 12px; z-index: 100;">
+              <div style="font-size: 14px; font-weight: 600; margin-bottom: 10px;">Audio Engine</div>
+
+              <div style="margin-bottom: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="audio-enabled" style="width: 16px; height: 16px;">
+                  <span>Enable Audio</span>
+                </label>
+              </div>
+
+              <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span>Master Volume</span>
+                  <span id="master-vol-val">50%</span>
+                </div>
+                <input type="range" id="master-volume" min="0" max="100" value="50" style="width: 100%;">
+              </div>
+
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button id="audio-add-osc" class="btn btn-secondary btn-sm">+ Oscillator</button>
+                <button id="audio-add-noise" class="btn btn-secondary btn-sm">+ Noise</button>
+                <button id="audio-add-filter" class="btn btn-secondary btn-sm">+ Filter</button>
+              </div>
+
+              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div style="font-size: 11px; color: #888;">
+                  Right-click canvas to add nodes. Drag between ports to connect.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="cameraFeatures" style="display:none; margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border-light); flex-shrink: 0;">
@@ -1216,6 +1257,79 @@
           </div>
         </div>
 
+        <!-- MIDI Output -->
+        <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="midi-section-header">
+          <span>MIDI Output</span>
+          <span id="midi-toggle-icon" style="font-size: 14px;">▶</span>
+        </div>
+        <div class="card" id="midi-section-content" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
+            <span class="field-label" style="margin: 0;">Status</span>
+            <span id="midi-pill" class="status-pill">Disconnected</span>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Port</label>
+            <select id="midi-port" style="width: 100%; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--border-light); background: var(--bg-primary); font-family: inherit; font-size: 13px;">
+              <option value="">Auto-detect IAC</option>
+            </select>
+          </div>
+
+          <div class="btn-group">
+            <button id="btn-midi-connect" class="btn btn-primary" style="flex: 1;">
+              Connect
+            </button>
+            <button id="btn-midi-disconnect" class="btn btn-secondary">
+              Disconnect
+            </button>
+          </div>
+
+          <div class="helper-text" style="margin-top: var(--space-sm);">
+            Enable IAC Driver in Audio MIDI Setup. EEG bands → CC 20-24, CV → CC 30-37.
+          </div>
+        </div>
+
+        <!-- Recording -->
+        <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="recording-section-header">
+          <span>Recording</span>
+          <span id="recording-toggle-icon" style="font-size: 14px;">▶</span>
+        </div>
+        <div class="card" id="recording-section-content" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
+            <span class="field-label" style="margin: 0;">Status</span>
+            <span id="recording-pill" class="status-pill">Ready</span>
+          </div>
+
+          <div class="btn-group">
+            <button id="btn-record-start" class="btn btn-primary" style="flex: 1;">
+              Record
+            </button>
+            <button id="btn-record-stop" class="btn btn-secondary">
+              Stop
+            </button>
+          </div>
+
+          <div id="recording-duration" class="helper-text" style="margin-top: var(--space-sm); display: none;">
+            Duration: <span id="rec-duration">00:00</span>
+          </div>
+
+          <div id="recording-download" style="display: none; margin-top: var(--space-sm);">
+            <div class="helper-text" style="margin-bottom: var(--space-xs);">Download recording:</div>
+            <div class="btn-group">
+              <button id="btn-download-json" class="btn btn-secondary" style="flex: 1; font-size: 11px;">
+                JSON
+              </button>
+              <button id="btn-download-csv" class="btn btn-secondary" style="flex: 1; font-size: 11px;">
+                CSV
+              </button>
+            </div>
+          </div>
+
+          <div class="helper-text" style="margin-top: var(--space-sm);">
+            Record EEG and CV data. Export as JSON or CSV.
+          </div>
+        </div>
+
         <!-- AI Assistant Chat -->
         <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="ai-section-header">
           <span>AI Assistant</span>
@@ -1233,10 +1347,6 @@
   </main>
 
   <script>
-    // Debug: Check if p5 is loaded
-    console.log('[DEBUG] Script started');
-    console.log('[DEBUG] p5 available:', typeof p5 !== 'undefined');
-    
     // Stream configuration constants - optimized for real-time EEG visualization
     const WINDOW_SEC = 4.0;  // 4 seconds provides good balance of temporal/frequency resolution
     const UPDATE_INTERVAL_MS = 50;  // 50ms = 20 updates/second for smooth visualization
@@ -1487,11 +1597,13 @@
     const tabBands = document.getElementById("tab-bands");
     const tabCamera = document.getElementById("tab-camera");
     const tabSketch = document.getElementById("tab-sketch");
+    const tabAudio = document.getElementById("tab-audio");
     tabTS.onclick = () => switchMode("timeseries");
     tabFFT.onclick = () => switchMode("fft");
     tabBands.onclick = () => switchMode("bands");
     tabCamera.onclick = () => switchMode("camera");
     tabSketch.onclick = () => switchMode("sketch");
+    tabAudio.onclick = () => switchMode("audio");
 
     function switchMode(mode) {
       if (mode === currentMode) return;
@@ -1501,11 +1613,12 @@
       tabBands.classList.toggle("active", mode === "bands");
       tabCamera.classList.toggle("active", mode === "camera");
       tabSketch.classList.toggle("active", mode === "sketch");
+      tabAudio.classList.toggle("active", mode === "audio");
 
       // Show/hide scale controls based on mode
       const scaleControls = document.getElementById("scale-controls");
       if (scaleControls) {
-        scaleControls.style.display = (mode === "camera" || mode === "sketch") ? "none" : "flex";
+        scaleControls.style.display = (mode === "camera" || mode === "sketch" || mode === "audio") ? "none" : "flex";
       }
 
       // Hide all views
@@ -1515,6 +1628,7 @@
       document.getElementById("cameraView").style.display = "none";
       document.getElementById("cameraFeatures").style.display = "none";
       document.getElementById("sketchView").style.display = "none";
+      document.getElementById("audioView").style.display = "none";
 
       if (mode === "timeseries") {
         visualTitle.textContent = "Time Series";
@@ -1537,6 +1651,20 @@
         if (typeof p5Sketch !== 'undefined' && !p5Sketch.isLooping()) {
           p5Sketch.loop();
         }
+      } else if (mode === "audio") {
+        visualTitle.textContent = "Audio Patcher";
+        visualSubtitle.textContent = "Modular synthesis controlled by EEG and CV data";
+        document.getElementById("audioView").style.display = "block";
+        // Initialize patcher if available (with delay to ensure container is visible)
+        setTimeout(() => {
+          if (typeof Patcher !== 'undefined') {
+            if (!patcherInitialized) {
+              initAudioPatcher();
+            } else {
+              Patcher.resize();
+            }
+          }
+        }, 100);
       } else {
         visualTitle.textContent = "Frequency Bands";
         visualSubtitle.textContent = "Per-channel power distribution across delta, theta, alpha, beta, and gamma bands";
@@ -1545,7 +1673,7 @@
 
       visualMeta.textContent = `Mode: ${mode} · Window: ${WINDOW_SEC.toFixed(1)}s`;
 
-      if (ws && mode !== "camera" && mode !== "assistant" && mode !== "sketch") {
+      if (ws && mode !== "camera" && mode !== "assistant" && mode !== "sketch" && mode !== "audio") {
         ws.send(
           JSON.stringify({
             mode,
@@ -1717,15 +1845,24 @@
             grid: { color: "rgba(0, 0, 0, 0.06)" },
           },
           y: {
-            beginAtZero: true,
+            type: 'logarithmic',
+            min: 1,
+            max: 10000,
             ticks: {
               color: "#666666",
-              font: { family: 'Inter' }
+              font: { family: 'Inter' },
+              callback: function(value) {
+                // Show clean labels at powers of 10 and key values
+                if ([1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000].includes(value)) {
+                  return value;
+                }
+                return '';
+              }
             },
             grid: { color: "rgba(0, 0, 0, 0.06)" },
             title: {
               display: true,
-              text: 'Power (%)',
+              text: 'Power (log scale)',
               color: "#999999",
               font: { family: 'Inter', weight: '500' }
             }
@@ -1945,6 +2082,31 @@
           updateFFTChart(msg.channels, msg.freqs, msg.psd);
         } else if (msg.type === "bands") {
           updateBandsChart(msg.channels, msg.bands, msg.values);
+          // Send EEG data to audio engine for modulation
+          if (audioEnabled && typeof AudioEngine !== 'undefined') {
+            // Send engagement index
+            if (msg.engagement !== undefined) {
+              AudioEngine.updateData('engagement', msg.engagement);
+            }
+            // Send band powers (use channel 0 or average)
+            if (msg.values && msg.values.length > 0 && msg.bands) {
+              const bandData = {};
+              msg.bands.forEach((band, i) => {
+                // Average across channels for this band
+                let sum = 0;
+                msg.values.forEach(chValues => {
+                  if (chValues[i] !== undefined) sum += chValues[i];
+                });
+                const rawValue = sum / msg.values.length;
+                // Normalize using log scale: raw values ~25-800 -> 0-100
+                // log10(25)≈1.4, log10(800)≈2.9, range≈1.5
+                const logValue = rawValue > 1 ? Math.log10(rawValue) : 0;
+                const normalized = Math.max(0, Math.min(100, ((logValue - 1.4) / 1.5) * 100));
+                bandData[band.toLowerCase()] = normalized;
+              });
+              AudioEngine.updateData('bands', bandData);
+            }
+          }
         } else if (msg.type === "error") {
           errorMsg.textContent = msg.message || "Stream error.";
           errorMsg.style.display = "block";
@@ -1987,10 +2149,15 @@
           updateFeatureMeter("mouth", features.mouth_openness || 0);
           updateFeatureMeter("roll", (features.head_roll || 0) / 30 + 0.5); // Map -15 to 15 -> 0 to 1
           updateFeatureMeter("smile", features.smile_curvature || 0);
-          
+
           // Feed camera data to Sketch
           if (typeof Sketch !== 'undefined') {
             Sketch.updateCamera(features);
+          }
+
+          // Feed CV data to Audio Engine
+          if (typeof updateAudioWithCVData === 'function') {
+            updateAudioWithCVData(features, msg.gaze, msg.ppg);
           }
         } else if (msg.type === "error") {
           errorMsg.textContent = msg.message || "Camera error.";
@@ -2058,11 +2225,9 @@
     // Initial status check
     refreshStatus();
     setOscChip();
-    
-    // DEBUG: Try to initialize sketch on page load
-    console.log('[DEBUG] Page loaded, attempting immediate sketch init');
+
+    // Initialize sketch on page load
     setTimeout(() => {
-      console.log('[DEBUG] Calling initP5Sketch from page load');
       initP5Sketch();
     }, 1000);
 
@@ -2098,6 +2263,30 @@
         const isVisible = aiContent.style.display !== 'none';
         aiContent.style.display = isVisible ? 'none' : 'flex';
         aiToggleIcon.textContent = isVisible ? '▶' : '▼';
+      });
+    }
+
+    // MIDI section collapse toggle (starts collapsed)
+    const midiHeader = document.getElementById('midi-section-header');
+    const midiContent = document.getElementById('midi-section-content');
+    const midiToggleIcon = document.getElementById('midi-toggle-icon');
+    if (midiHeader && midiContent && midiToggleIcon) {
+      midiHeader.addEventListener('click', () => {
+        const isVisible = midiContent.style.display !== 'none';
+        midiContent.style.display = isVisible ? 'none' : 'block';
+        midiToggleIcon.textContent = isVisible ? '▶' : '▼';
+      });
+    }
+
+    // Recording section collapse toggle (starts collapsed)
+    const recordingHeader = document.getElementById('recording-section-header');
+    const recordingContent = document.getElementById('recording-section-content');
+    const recordingToggleIcon = document.getElementById('recording-toggle-icon');
+    if (recordingHeader && recordingContent && recordingToggleIcon) {
+      recordingHeader.addEventListener('click', () => {
+        const isVisible = recordingContent.style.display !== 'none';
+        recordingContent.style.display = isVisible ? 'none' : 'block';
+        recordingToggleIcon.textContent = isVisible ? '▶' : '▼';
       });
     }
 
@@ -2170,38 +2359,29 @@
 
     function initP5Sketch() {
       if (sketchInitialized || p5Sketch) {
-        console.log('[Sketch] Already initialized');
         return;
       }
-      
-      console.log('[Sketch] Initializing enhanced p5 sketch...');
-      
+
       const sketch = (p) => {
         p.setup = function() {
           const container = document.getElementById('p5-container');
-          if (!container) {
-            console.error('[Sketch] Container not found!');
-            return;
-          }
-          
+          if (!container) return;
+
           const parent = container.parentElement;
           const rect = parent ? parent.getBoundingClientRect() : container.getBoundingClientRect();
           const width = rect.width || window.innerWidth * 0.7;
           const height = rect.height || window.innerHeight * 0.7;
-          
+
           const canvas = p.createCanvas(width, height);
           canvas.parent('p5-container');
           p.background(15, 15, 25);
-          
+
           // Initialize the Sketch system
           Sketch.init(p);
           Sketch.modes.particles.init(Sketch.config.count);
-          
-          console.log('[Sketch] Enhanced canvas created:', p.width, 'x', p.height);
         };
 
         p.draw = function() {
-          // Use Sketch draw system
           Sketch.draw();
         };
 
@@ -2212,11 +2392,8 @@
             const rect = parent ? parent.getBoundingClientRect() : container.getBoundingClientRect();
             const width = rect.width || window.innerWidth * 0.7;
             const height = rect.height || window.innerHeight * 0.7;
-            
+
             p.resizeCanvas(width, height);
-            console.log('[Sketch] Canvas resized to:', width, 'x', height);
-            
-            // Reinitialize current mode with new dimensions
             Sketch.modes[Sketch.config.mode].init(Sketch.config.count);
           }
         };
@@ -2224,7 +2401,6 @@
 
       p5Sketch = new p5(sketch);
       sketchInitialized = true;
-      console.log('[Sketch] Enhanced p5 initialized');
     }
 
     // Update bands data for enhanced p5 sketch
@@ -2247,24 +2423,17 @@
     const originalSwitchMode = switchMode;
     switchMode = function(mode) {
       originalSwitchMode(mode);
-      
+
       // When switching to sketch mode, initialize p5 and request bands data
       if (mode === "sketch") {
-        console.log('[Sketch] Switched to sketch mode');
-        
-        // Initialize p5 sketch if not already done (with longer delay to ensure DOM is ready)
         if (!sketchInitialized) {
-          console.log('[Sketch] Will initialize in 200ms...');
           setTimeout(() => {
             initP5Sketch();
           }, 200);
-        } else {
-          console.log('[Sketch] Already initialized, should be visible');
         }
-        
+
         // Request bands data if streaming
         if (ws && streaming) {
-          console.log('[Sketch] Requesting bands data');
           ws.send(
             JSON.stringify({
               mode: "bands",
@@ -2272,11 +2441,266 @@
               interval_ms: UPDATE_INTERVAL_MS,
             })
           );
-        } else {
-          console.log('[Sketch] Not streaming yet, start EEG first');
         }
       }
     };
+
+    // -------- MIDI Controls --------
+    let midiConnected = false;
+    const midiPill = document.getElementById('midi-pill');
+    const midiPortSelect = document.getElementById('midi-port');
+    const btnMidiConnect = document.getElementById('btn-midi-connect');
+    const btnMidiDisconnect = document.getElementById('btn-midi-disconnect');
+
+    // Load MIDI ports on page load
+    async function loadMidiPorts() {
+      try {
+        const res = await fetch('/api/midi/ports');
+        const data = await res.json();
+        if (data.available && data.ports) {
+          midiPortSelect.innerHTML = '<option value="">Auto-detect IAC</option>';
+          data.ports.forEach(port => {
+            const opt = document.createElement('option');
+            opt.value = port;
+            opt.textContent = port;
+            if (data.iac_port === port) {
+              opt.textContent += ' (IAC)';
+            }
+            midiPortSelect.appendChild(opt);
+          });
+        }
+      } catch (e) {
+        // MIDI ports unavailable
+      }
+    }
+    loadMidiPorts();
+
+    btnMidiConnect.onclick = async () => {
+      const portName = midiPortSelect.value || null;
+      try {
+        const res = await postJSON('/api/midi/connect', { port_name: portName });
+        if (res.status === 'ok') {
+          midiConnected = true;
+          midiPill.textContent = 'Connected';
+          midiPill.classList.add('active');
+          showSuccess(`MIDI connected to ${res.port}`);
+        } else {
+          showError(res.message || 'Failed to connect MIDI');
+        }
+      } catch (e) {
+        showError('MIDI connection failed: ' + e.message);
+      }
+    };
+
+    btnMidiDisconnect.onclick = async () => {
+      await postJSON('/api/midi/disconnect', {});
+      midiConnected = false;
+      midiPill.textContent = 'Disconnected';
+      midiPill.classList.remove('active');
+      showSuccess('MIDI disconnected');
+    };
+
+    // -------- Recording Controls --------
+    let recording = false;
+    let recordingStartTime = null;
+    let recordingTimer = null;
+    let lastSessionId = null;
+    const recordingPill = document.getElementById('recording-pill');
+    const btnRecordStart = document.getElementById('btn-record-start');
+    const btnRecordStop = document.getElementById('btn-record-stop');
+    const recordingDuration = document.getElementById('recording-duration');
+    const recDurationSpan = document.getElementById('rec-duration');
+    const recordingDownload = document.getElementById('recording-download');
+    const btnDownloadJson = document.getElementById('btn-download-json');
+    const btnDownloadCsv = document.getElementById('btn-download-csv');
+
+    btnRecordStart.onclick = async () => {
+      try {
+        const res = await postJSON('/api/recording/start', { metadata: { source: 'web' } });
+        if (res.status === 'ok') {
+          recording = true;
+          recordingStartTime = Date.now();
+          lastSessionId = res.session_id;
+          recordingPill.textContent = 'Recording';
+          recordingPill.classList.add('active');
+          recordingPill.style.background = 'var(--error)';
+          recordingPill.style.color = 'white';
+          recordingDuration.style.display = 'block';
+          recordingDownload.style.display = 'none';
+
+          // Update duration timer
+          recordingTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const secs = (elapsed % 60).toString().padStart(2, '0');
+            recDurationSpan.textContent = `${mins}:${secs}`;
+          }, 1000);
+
+          showSuccess(`Recording started: ${res.session_id}`);
+        }
+      } catch (e) {
+        showError('Failed to start recording: ' + e.message);
+      }
+    };
+
+    btnRecordStop.onclick = async () => {
+      try {
+        const res = await postJSON('/api/recording/stop', {});
+        recording = false;
+        clearInterval(recordingTimer);
+        recordingPill.textContent = 'Saved';
+        recordingPill.classList.remove('active');
+        recordingPill.style.background = '';
+        recordingPill.style.color = '';
+        recordingDuration.style.display = 'none';
+
+        // Show download buttons
+        recordingDownload.style.display = 'block';
+
+        if (res.summary) {
+          showSuccess(`Recording saved: ${res.summary.eeg_samples || 0} EEG samples, ${res.summary.cv_samples || 0} CV samples`);
+        } else {
+          showSuccess('Recording saved');
+        }
+
+        // Reset pill after delay
+        setTimeout(() => {
+          recordingPill.textContent = 'Ready';
+        }, 2000);
+      } catch (e) {
+        showError('Failed to stop recording: ' + e.message);
+      }
+    };
+
+    // Download handlers
+    btnDownloadJson.onclick = () => {
+      if (lastSessionId) {
+        window.open(`/api/recording/export/${lastSessionId}?format=json`, '_blank');
+      } else {
+        showError('No recording available');
+      }
+    };
+
+    btnDownloadCsv.onclick = () => {
+      if (lastSessionId) {
+        window.open(`/api/recording/export/${lastSessionId}?format=csv`, '_blank');
+      } else {
+        showError('No recording available');
+      }
+    };
+
+    // -------- Audio Patcher --------
+    let patcherInitialized = false;
+    let audioEnabled = false;
+
+    function initAudioPatcher() {
+      if (patcherInitialized) return;
+
+      const container = document.getElementById('patcher-container');
+      if (!container) return;
+
+      // Initialize patcher UI if available
+      if (typeof Patcher !== 'undefined') {
+        Patcher.init(container);
+        patcherInitialized = true;
+      }
+    }
+
+    // Audio controls
+    const audioEnabledCheckbox = document.getElementById('audio-enabled');
+    const masterVolumeSlider = document.getElementById('master-volume');
+    const masterVolVal = document.getElementById('master-vol-val');
+
+    if (audioEnabledCheckbox) {
+      audioEnabledCheckbox.onchange = () => {
+        audioEnabled = audioEnabledCheckbox.checked;
+        if (typeof AudioEngine !== 'undefined') {
+          if (audioEnabled) {
+            AudioEngine.start();
+          } else {
+            AudioEngine.stop();
+          }
+        }
+      };
+    }
+
+    if (masterVolumeSlider && masterVolVal) {
+      masterVolumeSlider.oninput = () => {
+        const vol = masterVolumeSlider.value;
+        masterVolVal.textContent = `${vol}%`;
+        if (typeof AudioEngine !== 'undefined') {
+          AudioEngine.setMasterVolume(vol / 100);
+        }
+      };
+    }
+
+    // Add node buttons
+    const addOscBtn = document.getElementById('audio-add-osc');
+    const addNoiseBtn = document.getElementById('audio-add-noise');
+    const addFilterBtn = document.getElementById('audio-add-filter');
+
+    if (addOscBtn) {
+      addOscBtn.onclick = () => {
+        if (typeof AudioEngine !== 'undefined') {
+          AudioEngine.createNode('oscillator', 100, 100);
+        }
+      };
+    }
+
+    if (addNoiseBtn) {
+      addNoiseBtn.onclick = () => {
+        if (typeof AudioEngine !== 'undefined') {
+          AudioEngine.createNode('noise', 100, 200);
+        }
+      };
+    }
+
+    if (addFilterBtn) {
+      addFilterBtn.onclick = () => {
+        if (typeof AudioEngine !== 'undefined') {
+          AudioEngine.createNode('filter', 250, 150);
+        }
+      };
+    }
+
+    // Feed EEG data to audio engine when in audio mode
+    const originalUpdateBandsForAudio = updateBandsChart;
+    updateBandsChart = function(channels, bandNames, values) {
+      originalUpdateBandsForAudio(channels, bandNames, values);
+
+      // Send to audio engine if available and enabled
+      if (audioEnabled && typeof AudioEngine !== 'undefined' && values && values.length > 0) {
+        const bands = {};
+        bandNames.forEach((band, idx) => {
+          const avg = values.reduce((sum, ch) => sum + (ch[idx] || 0), 0) / values.length;
+          bands[band.toLowerCase()] = avg; // Keep as 0-100 range, normalized in AudioEngine
+        });
+        AudioEngine.updateData('bands', bands);
+      }
+    };
+
+    // Feed CV data to audio engine
+    function updateAudioWithCVData(features, gaze, ppg) {
+      if (!audioEnabled || typeof AudioEngine === 'undefined') return;
+
+      if (features) {
+        AudioEngine.updateData('cv', {
+          mouth: features.mouth_openness || 0,
+          brow: features.brow_raise || 0,
+          yaw: features.head_yaw || 0,
+          roll: features.head_roll_relative || 0,
+          smile: features.smile_curvature || 0
+        });
+      }
+
+      if (gaze) {
+        AudioEngine.updateData('gaze', gaze);
+      }
+
+      if (ppg && ppg.heart_rate) {
+        AudioEngine.updateData('heart_rate', ppg.heart_rate);
+      }
+    }
   </script>
 </body>
 </html>

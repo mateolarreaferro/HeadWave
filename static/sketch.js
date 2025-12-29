@@ -56,7 +56,11 @@ const Sketch = {
     waves: null,
     radial: null,
     flow: null,
-    mandala: null
+    mandala: null,
+    spectrum: null,
+    lissajous: null,
+    neural: null,
+    plasma: null
   },
 
   // Initialize sketch
@@ -280,25 +284,25 @@ const Sketch = {
         const movementValue = sketch.getValue('movement');
         const hueValue = sketch.getValue('hue');
         const sizeValue = sketch.getValue('size');
-        
+
         this.rotation += 0.005 * config.speed * (movementValue / 20);
-        
+
         p.push();
         p.translate(p.width / 2, p.height / 2);
         p.rotate(this.rotation);
-        
+
         const layers = Math.floor(config.count / 10);
         const symmetry = 8;
-        
+
         for (let layer = 0; layer < layers; layer++) {
           const radius = (layer + 1) * (30 + sizeValue);
           const hue = p.map((hueValue + layer * 10) % 100, 0, 100, ...Sketch.getHueRange(config.colorScheme));
-          
+
           p.colorMode(p.HSB, 360, 100, 100);
           p.stroke(hue, 70, 80);
           p.noFill();
           p.strokeWeight(config.size / 5);
-          
+
           for (let i = 0; i < symmetry; i++) {
             const angle = (i / symmetry) * p.TWO_PI;
             const x = p.cos(angle) * radius;
@@ -306,8 +310,300 @@ const Sketch = {
             p.ellipse(x, y, config.size * 2);
           }
         }
-        
+
         p.pop();
+        p.colorMode(p.RGB, 255);
+      }
+    };
+
+    // SPECTRUM BARS MODE - Audio visualizer style with glow effects
+    this.modes.spectrum = {
+      bars: [],
+      smoothedValues: [],
+      init: function(count) {
+        this.bars = [];
+        this.smoothedValues = [];
+        for (let i = 0; i < count; i++) {
+          this.bars.push({
+            height: 0,
+            targetHeight: 0,
+            hue: 0
+          });
+          this.smoothedValues.push(0);
+        }
+      },
+      draw: function(config, sketch) {
+        const movementValue = sketch.getValue('movement');
+        const hueValue = sketch.getValue('hue');
+        const brightnessValue = sketch.getValue('brightness');
+
+        const numBars = Math.min(config.count, this.bars.length);
+        const barWidth = p.width / numBars;
+        const maxHeight = p.height * 0.8;
+
+        // Generate target heights based on data
+        for (let i = 0; i < numBars; i++) {
+          // Use different bands for different bar positions
+          const bandValue = i < numBars / 5 ? sketch.data.bands.delta :
+                           i < numBars * 2 / 5 ? sketch.data.bands.theta :
+                           i < numBars * 3 / 5 ? sketch.data.bands.alpha :
+                           i < numBars * 4 / 5 ? sketch.data.bands.beta :
+                           sketch.data.bands.gamma;
+
+          const noise = p.noise(i * 0.1, p.frameCount * 0.02);
+          this.bars[i].targetHeight = (bandValue / 100) * maxHeight * (0.5 + noise * 0.5);
+        }
+
+        // Smooth the values
+        for (let i = 0; i < numBars; i++) {
+          this.smoothedValues[i] = p.lerp(this.smoothedValues[i], this.bars[i].targetHeight, 0.1);
+        }
+
+        // Draw bars with glow
+        p.colorMode(p.HSB, 360, 100, 100);
+
+        for (let i = 0; i < numBars; i++) {
+          const x = i * barWidth;
+          const height = this.smoothedValues[i];
+          const hue = p.map((hueValue + i * 2) % 100, 0, 100, ...Sketch.getHueRange(config.colorScheme));
+          const brightness = p.map(brightnessValue, 0, 100, 50, 100);
+
+          // Glow effect (multiple layers)
+          for (let g = 3; g >= 0; g--) {
+            const glowAlpha = p.map(g, 0, 3, 200, 30);
+            const glowWidth = barWidth - 2 + g * 4;
+            p.fill(hue, 70, brightness, glowAlpha);
+            p.noStroke();
+            p.rect(x + (barWidth - glowWidth) / 2, p.height - height, glowWidth, height, 3);
+          }
+
+          // Reflection
+          p.fill(hue, 70, brightness * 0.3, 50);
+          p.rect(x + 2, p.height, barWidth - 4, height * 0.2, 3);
+        }
+
+        p.colorMode(p.RGB, 255);
+      }
+    };
+
+    // LISSAJOUS MODE - Classic oscilloscope-style curves
+    this.modes.lissajous = {
+      phase: 0,
+      points: [],
+      init: function(count) {
+        this.points = [];
+        this.phase = 0;
+      },
+      draw: function(config, sketch) {
+        const movementValue = sketch.getValue('movement');
+        const hueValue = sketch.getValue('hue');
+        const sizeValue = sketch.getValue('size');
+
+        // Update phase
+        this.phase += 0.01 * config.speed * (movementValue / 20);
+
+        const centerX = p.width / 2;
+        const centerY = p.height / 2;
+        const amplitude = Math.min(p.width, p.height) * 0.35;
+
+        // Frequency ratios influenced by EEG bands
+        const freqA = 2 + sketch.data.bands.alpha / 30;
+        const freqB = 3 + sketch.data.bands.beta / 30;
+        const freqC = 1 + sketch.data.bands.theta / 50;
+
+        p.colorMode(p.HSB, 360, 100, 100);
+        p.noFill();
+
+        // Draw multiple Lissajous curves
+        for (let curve = 0; curve < 3; curve++) {
+          const phaseOffset = curve * p.PI / 3;
+          const curveHue = p.map((hueValue + curve * 30) % 100, 0, 100, ...Sketch.getHueRange(config.colorScheme));
+
+          p.beginShape();
+          for (let t = 0; t < p.TWO_PI * 4; t += 0.02) {
+            const x = centerX + amplitude * p.sin(freqA * t + this.phase + phaseOffset);
+            const y = centerY + amplitude * p.sin(freqB * t + freqC * this.phase);
+
+            const alpha = p.map(t, 0, p.TWO_PI * 4, 200, 50);
+            p.stroke(curveHue, 70, 80, alpha);
+            p.strokeWeight(config.size / 8);
+            p.vertex(x, y);
+          }
+          p.endShape();
+        }
+
+        // Draw a pulsing center point
+        const pulseSize = config.size * (1 + p.sin(this.phase * 2) * 0.3);
+        p.fill(p.map(hueValue, 0, 100, ...Sketch.getHueRange(config.colorScheme)), 80, 100);
+        p.noStroke();
+        p.ellipse(centerX, centerY, pulseSize * 2);
+
+        p.colorMode(p.RGB, 255);
+      }
+    };
+
+    // NEURAL NETWORK MODE - 2D node graph with pulsing connections
+    this.modes.neural = {
+      nodes: [],
+      pulses: [],
+      init: function(count) {
+        this.nodes = [];
+        this.pulses = [];
+
+        // Create nodes in a grid-like pattern with some randomness
+        const cols = Math.ceil(Math.sqrt(count));
+        const rows = Math.ceil(count / cols);
+        const spacingX = p.width / (cols + 1);
+        const spacingY = p.height / (rows + 1);
+
+        for (let i = 0; i < count; i++) {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          this.nodes.push({
+            x: spacingX * (col + 1) + p.random(-30, 30),
+            y: spacingY * (row + 1) + p.random(-30, 30),
+            size: p.random(5, 15),
+            activation: p.random(0, 1),
+            connections: []
+          });
+        }
+
+        // Create connections between nearby nodes
+        for (let i = 0; i < this.nodes.length; i++) {
+          for (let j = i + 1; j < this.nodes.length; j++) {
+            const d = p.dist(this.nodes[i].x, this.nodes[i].y, this.nodes[j].x, this.nodes[j].y);
+            if (d < spacingX * 1.5 && p.random() > 0.5) {
+              this.nodes[i].connections.push(j);
+            }
+          }
+        }
+      },
+      draw: function(config, sketch) {
+        const movementValue = sketch.getValue('movement');
+        const hueValue = sketch.getValue('hue');
+        const brightnessValue = sketch.getValue('brightness');
+
+        p.colorMode(p.HSB, 360, 100, 100);
+
+        // Update node activations based on EEG
+        const engagementFactor = (sketch.data.bands.beta / (sketch.data.bands.alpha + sketch.data.bands.theta + 1)) / 2;
+
+        // Create pulses based on engagement
+        if (p.frameCount % Math.max(10, Math.floor(50 - engagementFactor * 40)) === 0 && this.nodes.length > 0) {
+          const startNode = Math.floor(p.random(this.nodes.length));
+          if (this.nodes[startNode].connections.length > 0) {
+            const endNode = this.nodes[startNode].connections[Math.floor(p.random(this.nodes[startNode].connections.length))];
+            this.pulses.push({
+              from: startNode,
+              to: endNode,
+              progress: 0,
+              speed: 0.02 + engagementFactor * 0.03
+            });
+          }
+        }
+
+        // Draw connections
+        this.nodes.forEach((node, i) => {
+          node.connections.forEach(j => {
+            const other = this.nodes[j];
+            const alpha = 30 + (node.activation + this.nodes[j].activation) * 20;
+            p.stroke(200, 30, 50, alpha);
+            p.strokeWeight(1);
+            p.line(node.x, node.y, other.x, other.y);
+          });
+        });
+
+        // Update and draw pulses
+        this.pulses = this.pulses.filter(pulse => {
+          pulse.progress += pulse.speed * config.speed;
+
+          if (pulse.progress >= 1) {
+            // Activate destination node
+            this.nodes[pulse.to].activation = Math.min(1, this.nodes[pulse.to].activation + 0.3);
+            return false;
+          }
+
+          const from = this.nodes[pulse.from];
+          const to = this.nodes[pulse.to];
+          const x = p.lerp(from.x, to.x, pulse.progress);
+          const y = p.lerp(from.y, to.y, pulse.progress);
+
+          const hue = p.map(hueValue, 0, 100, ...Sketch.getHueRange(config.colorScheme));
+          p.fill(hue, 80, 100);
+          p.noStroke();
+          p.ellipse(x, y, config.size / 2);
+
+          return true;
+        });
+
+        // Draw and update nodes
+        this.nodes.forEach((node, i) => {
+          // Decay activation
+          node.activation *= 0.98;
+
+          // Add noise to activation
+          node.activation += p.noise(i, p.frameCount * 0.01) * 0.02;
+          node.activation = p.constrain(node.activation, 0, 1);
+
+          const hue = p.map((hueValue + node.activation * 60) % 100, 0, 100, ...Sketch.getHueRange(config.colorScheme));
+          const brightness = p.map(brightnessValue + node.activation * 30, 0, 130, 40, 100);
+
+          // Glow effect
+          for (let g = 2; g >= 0; g--) {
+            const glowSize = node.size * (1 + node.activation) + g * 4;
+            const glowAlpha = p.map(g, 0, 2, 200, 50);
+            p.fill(hue, 70, brightness, glowAlpha);
+            p.noStroke();
+            p.ellipse(node.x, node.y, glowSize);
+          }
+        });
+
+        p.colorMode(p.RGB, 255);
+      }
+    };
+
+    // PLASMA MODE - Organic flowing color field using Perlin noise
+    this.modes.plasma = {
+      time: 0,
+      init: function(count) {
+        this.time = 0;
+      },
+      draw: function(config, sketch) {
+        const movementValue = sketch.getValue('movement');
+        const hueValue = sketch.getValue('hue');
+        const brightnessValue = sketch.getValue('brightness');
+
+        this.time += 0.01 * config.speed * (movementValue / 30);
+
+        const resolution = Math.max(4, 20 - Math.floor(config.count / 20));
+        p.colorMode(p.HSB, 360, 100, 100);
+        p.noStroke();
+
+        // EEG-influenced noise parameters
+        const scale1 = 0.005 + sketch.data.bands.alpha / 5000;
+        const scale2 = 0.003 + sketch.data.bands.beta / 8000;
+        const scale3 = 0.008 + sketch.data.bands.theta / 3000;
+
+        for (let x = 0; x < p.width; x += resolution) {
+          for (let y = 0; y < p.height; y += resolution) {
+            // Multiple layers of noise
+            const noise1 = p.noise(x * scale1, y * scale1, this.time);
+            const noise2 = p.noise(x * scale2 + 100, y * scale2 + 100, this.time * 0.5);
+            const noise3 = p.noise(x * scale3 + 200, y * scale3, this.time * 0.3);
+
+            // Combine noise layers
+            const combined = (noise1 + noise2 * 0.5 + noise3 * 0.3) / 1.8;
+
+            // Map to hue
+            const hue = p.map(combined + hueValue / 100, 0, 2, ...Sketch.getHueRange(config.colorScheme));
+            const saturation = 60 + noise2 * 40;
+            const brightness = p.map(brightnessValue, 0, 100, 40, 90) + noise3 * 20;
+
+            p.fill(hue, saturation, brightness);
+            p.rect(x, y, resolution + 1, resolution + 1);
+          }
+        }
+
         p.colorMode(p.RGB, 255);
       }
     };
