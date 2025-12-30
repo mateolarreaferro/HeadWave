@@ -17,6 +17,8 @@ const Patcher = {
   hoveredPort: null,
   hoveredCable: null,
   mousePos: { x: 0, y: 0 },
+  isFullscreen: false,
+  originalStyles: null,
 
   // Layout
   nodeWidth: 180,
@@ -85,8 +87,18 @@ const Patcher = {
     this.resize();
     window.addEventListener('resize', () => this.resize());
 
+    // Create fullscreen button
+    this.createFullscreenButton();
+
     // Event listeners
     this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
+
+    // ESC to exit fullscreen
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isFullscreen) {
+        this.toggleFullscreen();
+      }
+    });
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
     this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
@@ -118,6 +130,72 @@ const Patcher = {
 
     // Scale context
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  },
+
+  // Create fullscreen toggle button
+  createFullscreenButton: function() {
+    const btn = document.createElement('button');
+    btn.className = 'patcher-fullscreen-btn';
+    btn.innerHTML = '⛶';
+    btn.title = 'Toggle Fullscreen (ESC to exit)';
+    btn.style.cssText = `
+      position: absolute; top: 10px; right: 10px; z-index: 100;
+      width: 32px; height: 32px; border-radius: 6px;
+      background: ${this.theme.bg.tertiary}; border: 1px solid ${this.theme.node.border};
+      color: ${this.theme.text.secondary}; font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s ease;
+    `;
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = this.theme.bg.secondary;
+      btn.style.color = this.theme.text.primary;
+      btn.style.borderColor = this.theme.port.input;
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = this.theme.bg.tertiary;
+      btn.style.color = this.theme.text.secondary;
+      btn.style.borderColor = this.theme.node.border;
+    });
+    btn.addEventListener('click', () => this.toggleFullscreen());
+    this.container.appendChild(btn);
+    this.fullscreenBtn = btn;
+  },
+
+  // Toggle fullscreen mode
+  toggleFullscreen: function() {
+    if (!this.isFullscreen) {
+      // Save original styles
+      this.originalStyles = {
+        position: this.container.style.position,
+        top: this.container.style.top,
+        left: this.container.style.left,
+        width: this.container.style.width,
+        height: this.container.style.height,
+        zIndex: this.container.style.zIndex,
+        borderRadius: this.container.style.borderRadius
+      };
+
+      // Go fullscreen
+      this.container.style.position = 'fixed';
+      this.container.style.top = '0';
+      this.container.style.left = '0';
+      this.container.style.width = '100vw';
+      this.container.style.height = '100vh';
+      this.container.style.zIndex = '9999';
+      this.container.style.borderRadius = '0';
+      this.fullscreenBtn.innerHTML = '⛶';
+      this.fullscreenBtn.title = 'Exit Fullscreen (ESC)';
+      this.isFullscreen = true;
+    } else {
+      // Restore original styles
+      Object.assign(this.container.style, this.originalStyles);
+      this.fullscreenBtn.innerHTML = '⛶';
+      this.fullscreenBtn.title = 'Toggle Fullscreen (ESC to exit)';
+      this.isFullscreen = false;
+    }
+
+    // Resize canvas after style change
+    setTimeout(() => this.resize(), 50);
   },
 
   // Get mouse position adjusted for HiDPI
@@ -404,7 +482,8 @@ const Patcher = {
       const categories = {
         'Sources': [
           { type: 'oscillator', icon: '〜', desc: 'Sine/Saw/Square wave' },
-          { type: 'noise', icon: '⁂', desc: 'White/Pink noise' }
+          { type: 'noise', icon: '⁂', desc: 'White/Pink noise' },
+          { type: 'sampler', icon: '▶', desc: 'Sample player' }
         ],
         'Effects': [
           { type: 'filter', icon: '◇', desc: 'LP/HP/BP filter' },
@@ -481,7 +560,7 @@ const Patcher = {
   // Parameters dialog
   showParamsDialog: function(node) {
     const nodeType = AudioEngine.nodeTypes[node.type];
-    if (!nodeType?.params) return;
+    if (!nodeType?.params && node.type !== 'sampler') return;
 
     document.querySelectorAll('.patcher-dialog').forEach(d => d.remove());
 
@@ -501,6 +580,23 @@ const Patcher = {
         <h3 style="margin: 0; color: ${this.theme.text.primary}; font-size: 16px; font-weight: 600;">${node.name}</h3>
       </div>
     `;
+
+    // Add file upload for sampler nodes
+    if (node.type === 'sampler') {
+      const hasFile = AudioEngine.sampleBuffers[node.id];
+      html += `
+        <div style="margin-bottom: 14px;">
+          <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Audio File</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="file" id="sampler-file-${node.id}" accept="audio/*" style="display: none;">
+            <button id="sampler-upload-btn-${node.id}" style="flex: 1; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 13px;">
+              ${hasFile ? '✓ Sample Loaded - Click to Change' : 'Choose Audio File...'}
+            </button>
+          </div>
+          <div id="sampler-filename-${node.id}" style="margin-top: 6px; font-size: 11px; color: ${this.theme.text.muted};"></div>
+        </div>
+      `;
+    }
 
     for (const [param, config] of Object.entries(nodeType.params)) {
       const value = node.params[param];
@@ -557,6 +653,38 @@ const Patcher = {
     });
 
     dialog.querySelector('.dialog-close').addEventListener('click', () => dialog.remove());
+
+    // Handle sampler file upload
+    if (node.type === 'sampler') {
+      const fileInput = dialog.querySelector(`#sampler-file-${node.id}`);
+      const uploadBtn = dialog.querySelector(`#sampler-upload-btn-${node.id}`);
+      const filenameDiv = dialog.querySelector(`#sampler-filename-${node.id}`);
+
+      if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          uploadBtn.textContent = 'Loading...';
+          uploadBtn.disabled = true;
+
+          try {
+            await AudioEngine.loadSampleForNode(node.id, file);
+            uploadBtn.textContent = '✓ ' + file.name;
+            uploadBtn.style.borderColor = '#22c55e';
+            filenameDiv.textContent = `Duration: ${(AudioEngine.sampleBuffers[node.id].duration).toFixed(2)}s`;
+          } catch (err) {
+            uploadBtn.textContent = 'Error - Try Again';
+            uploadBtn.style.borderColor = '#f85149';
+            filenameDiv.textContent = err.message;
+          }
+
+          uploadBtn.disabled = false;
+        });
+      }
+    }
   },
 
   // Render
@@ -628,6 +756,11 @@ const Patcher = {
     const isSelected = node.id === this.selectedNode;
     const accentColor = this.theme.accent[node.category] || this.theme.accent.processor;
 
+    // Get live value from AudioEngine
+    const audioNode = AudioEngine.nodes[node.id];
+    const liveValue = audioNode?.outputValue;
+    const hasLiveValue = liveValue !== undefined && liveValue !== null;
+
     // Shadow
     ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
     ctx.shadowBlur = isSelected ? 24 : 12;
@@ -664,16 +797,77 @@ const Patcher = {
     ctx.textBaseline = 'middle';
     ctx.fillText(node.name, x + 12, y + hh / 2 + 6);
 
+    // Live value display (top right of node)
+    if (hasLiveValue) {
+      const displayValue = liveValue < 10 ? liveValue.toFixed(3) : liveValue.toFixed(1);
+      const valueWidth = ctx.measureText(displayValue).width + 12;
+
+      // Value badge background
+      ctx.fillStyle = accentColor + '30';
+      ctx.beginPath();
+      ctx.roundRect(x + w - valueWidth - 8, y + 10, valueWidth, 18, 4);
+      ctx.fill();
+
+      // Value text
+      ctx.fillStyle = accentColor;
+      ctx.font = '600 11px -apple-system, system-ui, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(displayValue, x + w - 14, y + 21);
+      ctx.textAlign = 'left';
+    }
+
     // Params preview
-    const paramKeys = Object.keys(node.params).slice(0, 2);
     ctx.fillStyle = this.theme.text.secondary;
     ctx.font = '11px -apple-system, system-ui, sans-serif';
     let py = y + hh + 14;
-    for (const key of paramKeys) {
-      let val = node.params[key];
-      if (typeof val === 'number') val = val.toFixed(1);
-      ctx.fillText(`${key}: ${val}`, x + 12, py);
-      py += 16;
+
+    // Special display for sampler nodes
+    if (node.type === 'sampler') {
+      const hasBuffer = AudioEngine.sampleBuffers && AudioEngine.sampleBuffers[node.id];
+      if (hasBuffer) {
+        ctx.fillStyle = '#22c55e';
+        ctx.fillText('✓ Sample loaded', x + 12, py);
+        py += 16;
+        ctx.fillStyle = this.theme.text.secondary;
+        ctx.fillText(`speed: ${node.params.speed?.toFixed(2) || 1}`, x + 12, py);
+      } else {
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.fillText('Double-click to load', x + 12, py);
+        py += 16;
+        ctx.fillText('audio file...', x + 12, py);
+      }
+    } else {
+      const paramKeys = Object.keys(node.params).slice(0, 2);
+      for (const key of paramKeys) {
+        let val = node.params[key];
+        if (typeof val === 'number') val = val.toFixed(1);
+        ctx.fillText(`${key}: ${val}`, x + 12, py);
+        py += 16;
+      }
+    }
+
+    // Signal flow indicator bar (for modulators)
+    if (hasLiveValue && (node.category === 'modulator' || node.type === 'scale')) {
+      const barY = y + h - 12;
+      const barWidth = w - 24;
+      const barHeight = 4;
+
+      // Background bar
+      ctx.fillStyle = this.theme.bg.primary;
+      ctx.beginPath();
+      ctx.roundRect(x + 12, barY, barWidth, barHeight, 2);
+      ctx.fill();
+
+      // Value bar (normalized for display)
+      let normalizedValue = node.type === 'scale'
+        ? (liveValue - node.params.min) / (node.params.max - node.params.min)
+        : liveValue;
+      normalizedValue = Math.max(0, Math.min(1, normalizedValue));
+
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.roundRect(x + 12, barY, barWidth * normalizedValue, barHeight, 2);
+      ctx.fill();
     }
 
     // Input ports
@@ -739,6 +933,41 @@ const Patcher = {
     const isHovered = this.hoveredCable === cable;
     const color = isHovered ? '#f85149' : this.theme.cable.default;
     this.drawCablePath(fromPort.x, fromPort.y, toPort.x, toPort.y, color, isHovered);
+
+    // Show value on cable (at midpoint)
+    const audioNode = AudioEngine.nodes[cable.fromNode];
+    if (audioNode?.outputValue !== undefined) {
+      const value = audioNode.outputValue;
+      const midX = (fromPort.x + toPort.x) / 2;
+      const midY = (fromPort.y + toPort.y) / 2;
+
+      // Format value for display
+      const displayValue = value < 10 ? value.toFixed(2) : value.toFixed(0);
+
+      // Draw value badge on cable
+      const ctx = this.ctx;
+      ctx.font = '10px -apple-system, system-ui, monospace';
+      const textWidth = ctx.measureText(displayValue).width;
+      const badgeWidth = textWidth + 8;
+      const badgeHeight = 14;
+
+      // Badge background
+      ctx.fillStyle = this.theme.bg.secondary;
+      ctx.beginPath();
+      ctx.roundRect(midX - badgeWidth/2, midY - badgeHeight/2, badgeWidth, badgeHeight, 3);
+      ctx.fill();
+
+      // Badge border
+      ctx.strokeStyle = isHovered ? '#f85149' : this.theme.cable.default;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Value text
+      ctx.fillStyle = isHovered ? '#f85149' : this.theme.text.primary;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(displayValue, midX, midY);
+    }
   },
 
   drawCablePath: function(x1, y1, x2, y2, color, isActive) {

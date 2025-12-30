@@ -7,8 +7,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
   <script src="/static/sketch.js"></script>
-  <script src="/static/audio.js"></script>
-  <script src="/static/patcher.js"></script>
+  <script src="/static/audio.js?v=5"></script>
+  <script src="/static/patcher.js?v=5"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -2222,7 +2222,7 @@
 
           // Feed CV data to Audio Engine
           if (typeof updateAudioWithCVData === 'function') {
-            updateAudioWithCVData(features, gaze);
+            updateAudioWithCVData(features, gaze, hands);
           }
         } else if (msg.type === "error") {
           errorMsg.textContent = msg.message || "Camera error.";
@@ -2793,7 +2793,7 @@
     };
 
     // Feed CV data to audio engine
-    function updateAudioWithCVData(features, gaze) {
+    function updateAudioWithCVData(features, gaze, hands) {
       if (!audioEnabled || typeof AudioEngine === 'undefined') return;
 
       if (features) {
@@ -2807,6 +2807,29 @@
 
       if (gaze) {
         AudioEngine.updateData('gaze', gaze);
+      }
+
+      if (hands) {
+        // Format hand data for AudioEngine
+        const handData = {
+          left: hands.left ? {
+            detected: hands.left.detected ? 1 : 0,
+            pinch_distance: hands.left.pinch_distance || 0,
+            openness: hands.left.openness || 0,
+            palm_x: hands.left.palm_x || 0.5,
+            palm_y: hands.left.palm_y || 0.5,
+            palm_z: hands.left.palm_z || 0
+          } : { detected: 0 },
+          right: hands.right ? {
+            detected: hands.right.detected ? 1 : 0,
+            pinch_distance: hands.right.pinch_distance || 0,
+            openness: hands.right.openness || 0,
+            palm_x: hands.right.palm_x || 0.5,
+            palm_y: hands.right.palm_y || 0.5,
+            palm_z: hands.right.palm_z || 0
+          } : { detected: 0 }
+        };
+        AudioEngine.updateData('hands', handData);
       }
     }
   </script>

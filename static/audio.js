@@ -19,6 +19,9 @@ const AudioEngine = {
   // Connections
   connections: [],
 
+  // Sample buffers (per node ID)
+  sampleBuffers: {},
+
   // Data sources
   data: {
     bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 },
@@ -49,6 +52,16 @@ const AudioEngine = {
       outputs: ['audio'],
       params: {
         type: { default: 'white', options: ['white', 'pink', 'brown'] }
+      }
+    },
+    sampler: {
+      name: 'Sampler',
+      category: 'source',
+      inputs: ['speed'],
+      outputs: ['audio'],
+      params: {
+        speed: { default: 1, min: 0.1, max: 4 },
+        loop: { default: true, options: [true, false] }
       }
     },
 
@@ -133,7 +146,7 @@ const AudioEngine = {
       outputs: ['signal'],
       params: {
         hand: { default: 'left', options: ['left', 'right'] },
-        feature: { default: 'pinch', options: ['pinch', 'openness', 'x', 'y', 'z'] },
+        feature: { default: 'detected', options: ['detected', 'pinch', 'openness', 'x', 'y', 'z'] },
         smoothing: { default: 0.1, min: 0, max: 1 }
       }
     },
@@ -285,6 +298,9 @@ const AudioEngine = {
       case 'noise':
         return this._createNoiseNode(params.type);
 
+      case 'sampler':
+        return this._createSamplerNode(params, this.nodeCounter);
+
       case 'filter':
         const filter = this.ctx.createBiquadFilter();
         filter.type = params.type;
@@ -319,6 +335,71 @@ const AudioEngine = {
       default:
         return null;
     }
+  },
+
+  // Create sampler node (initially silent, needs sample loaded)
+  _createSamplerNode: function(params, nodeId) {
+    if (!this.ctx) return null;
+
+    // Create a gain node as placeholder (will connect source to this)
+    const gainNode = this.ctx.createGain();
+    gainNode.gain.value = 1;
+    gainNode._nodeId = nodeId;
+    gainNode._params = params;
+    gainNode._source = null;
+
+    return gainNode;
+  },
+
+  // Load sample for a specific sampler node
+  loadSampleForNode: function(nodeId, file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const arrayBuffer = e.target.result;
+          const buffer = await this.ctx.decodeAudioData(arrayBuffer);
+          this.sampleBuffers[nodeId] = buffer;
+
+          // Start playback
+          const node = this.nodes[nodeId];
+          if (node && node.audioNode) {
+            this._startSamplerPlayback(nodeId);
+          }
+
+          resolve(buffer);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
+  // Start/restart sampler playback
+  _startSamplerPlayback: function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || !node.audioNode) return;
+
+    const buffer = this.sampleBuffers[nodeId];
+    if (!buffer) return;
+
+    // Stop existing source
+    if (node.audioNode._source) {
+      try { node.audioNode._source.stop(); } catch (e) {}
+      node.audioNode._source.disconnect();
+    }
+
+    // Create new source
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = node.params.loop;
+    source.playbackRate.value = node.params.speed;
+    source.connect(node.audioNode);
+    source.start();
+
+    node.audioNode._source = source;
   },
 
   // Create noise generator
@@ -495,6 +576,22 @@ const AudioEngine = {
             node.audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
           }
           break;
+        case 'speed':
+          // For sampler nodes, speed is on the source
+          if (node.audioNode._source?.playbackRate) {
+            node.audioNode._source.playbackRate.setValueAtTime(value, this.ctx.currentTime);
+          } else if (node.audioNode.playbackRate) {
+            node.audioNode.playbackRate.setValueAtTime(value, this.ctx.currentTime);
+          }
+          break;
+        case 'loop':
+          // For sampler nodes, need to restart with new loop setting
+          if (node.type === 'sampler') {
+            this._startSamplerPlayback(node.id);
+          } else if (node.audioNode.loop !== undefined) {
+            node.audioNode.loop = value;
+          }
+          break;
       }
     }
   },
@@ -538,7 +635,11 @@ const AudioEngine = {
         const feature = node.params.feature;
         let value = 0;
         const handData = this.data.hands[hand];
-        if (handData && handData.detected) {
+
+        if (feature === 'detected') {
+          // Binary 0 or 1 for hand detection state
+          value = (handData && handData.detected) ? 1 : 0;
+        } else if (handData && handData.detected) {
           if (feature === 'pinch') value = handData.pinch_distance || 0;
           else if (feature === 'openness') value = handData.openness || 0;
           else if (feature === 'x') value = handData.palm_x || 0.5;
@@ -608,6 +709,14 @@ const AudioEngine = {
       } else if (input === 'detune') {
         const detune = isFromRange ? value : (value * 1200 - 600);
         targetNode.audioNode.detune?.setValueAtTime(detune, this.ctx.currentTime);
+      } else if (input === 'speed') {
+        const speed = isFromRange ? value : (0.25 + value * 3.75); // 0.25x to 4x
+        // For sampler nodes, speed is on the source
+        if (targetNode.audioNode._source?.playbackRate) {
+          targetNode.audioNode._source.playbackRate.setValueAtTime(speed, this.ctx.currentTime);
+        } else if (targetNode.audioNode.playbackRate) {
+          targetNode.audioNode.playbackRate.setValueAtTime(speed, this.ctx.currentTime);
+        }
       }
     }
   },
