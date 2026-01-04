@@ -1,8 +1,3 @@
-# session_recorder.py
-"""
-Session Recording System for HeadWave
-Records EEG, CV, and derived metrics with timestamps for export
-"""
 import os
 import json
 import csv
@@ -16,46 +11,35 @@ from pathlib import Path
 
 
 class SessionRecorder:
-    """
-    Records biofeedback session data with timestamps.
-    Supports JSON and CSV export.
-    """
 
     def __init__(self, recordings_dir: str = "recordings"):
-        """
-        Args:
-            recordings_dir: Directory to store recordings
-        """
         self.recordings_dir = Path(recordings_dir)
         self.recordings_dir.mkdir(parents=True, exist_ok=True)
 
-        # Recording state
         self.recording = False
         self.session_id: Optional[str] = None
         self.start_time: Optional[float] = None
 
-        # Data buffers
         self.eeg_data: List[Dict] = []
         self.cv_data: List[Dict] = []
         self.engagement_data: List[Dict] = []
         self.artifacts_data: List[Dict] = []
         self.ppg_data: List[Dict] = []
 
-        # Metadata
         self.metadata: Dict[str, Any] = {}
 
         self.lock = threading.Lock()
 
+    @property
+    def current_session_id(self) -> Optional[str]:
+        return self.session_id
+
+    def get_duration(self) -> float:
+        if not self.recording or self.start_time is None:
+            return 0.0
+        return time.time() - self.start_time
+
     def start_recording(self, metadata: Optional[Dict] = None) -> str:
-        """
-        Start a new recording session.
-
-        Args:
-            metadata: Optional session metadata (description, tags, etc.)
-
-        Returns:
-            Session ID
-        """
         with self.lock:
             if self.recording:
                 raise RuntimeError("Recording already in progress")
@@ -64,14 +48,12 @@ class SessionRecorder:
             self.start_time = time.time()
             self.recording = True
 
-            # Clear buffers
             self.eeg_data = []
             self.cv_data = []
             self.engagement_data = []
             self.artifacts_data = []
             self.ppg_data = []
 
-            # Set metadata
             self.metadata = {
                 'session_id': self.session_id,
                 'start_time': datetime.now().isoformat(),
@@ -83,12 +65,6 @@ class SessionRecorder:
             return self.session_id
 
     def stop_recording(self) -> Dict[str, Any]:
-        """
-        Stop the current recording session.
-
-        Returns:
-            Session summary
-        """
         with self.lock:
             if not self.recording:
                 raise RuntimeError("No recording in progress")
@@ -118,7 +94,6 @@ class SessionRecorder:
 
     def record_eeg(self, channels: List[str], bands: List[str],
                    values: List[List[float]], timestamp: Optional[float] = None):
-        """Record EEG band power data"""
         if not self.recording:
             return
 
@@ -133,7 +108,6 @@ class SessionRecorder:
 
     def record_cv(self, face: Dict[str, float], gaze: Dict[str, float],
                   hands: Dict[str, Any], timestamp: Optional[float] = None):
-        """Record computer vision features"""
         if not self.recording:
             return
 
@@ -148,7 +122,6 @@ class SessionRecorder:
 
     def record_engagement(self, channels: List[str], values: List[float],
                           average: float, timestamp: Optional[float] = None):
-        """Record engagement index data"""
         if not self.recording:
             return
 
@@ -163,7 +136,6 @@ class SessionRecorder:
 
     def record_artifacts(self, channels: List[str], flags: List[bool],
                          quality: List[float], timestamp: Optional[float] = None):
-        """Record artifact detection data"""
         if not self.recording:
             return
 
@@ -178,7 +150,6 @@ class SessionRecorder:
 
     def record_ppg(self, heart_rate: float, hrv: float,
                    quality: float, timestamp: Optional[float] = None):
-        """Record PPG/heart rate data"""
         if not self.recording:
             return
 
@@ -192,15 +163,6 @@ class SessionRecorder:
             })
 
     def export_json(self, session_id: Optional[str] = None) -> str:
-        """
-        Export session data as JSON.
-
-        Args:
-            session_id: Session to export (default: current/last session)
-
-        Returns:
-            Path to exported file
-        """
         with self.lock:
             sid = session_id or self.session_id
             if not sid:
@@ -225,15 +187,6 @@ class SessionRecorder:
             return str(filepath)
 
     def export_csv(self, session_id: Optional[str] = None) -> Dict[str, str]:
-        """
-        Export session data as CSV files (one per data type).
-
-        Args:
-            session_id: Session to export (default: current/last session)
-
-        Returns:
-            Dict mapping data type to file path
-        """
         with self.lock:
             sid = session_id or self.session_id
             if not sid:
@@ -241,25 +194,21 @@ class SessionRecorder:
 
             exported_files = {}
 
-            # Export EEG data
             if self.eeg_data:
                 filepath = self.recordings_dir / f"session_{sid}_eeg.csv"
                 self._export_eeg_csv(filepath)
                 exported_files['eeg'] = str(filepath)
 
-            # Export CV data
             if self.cv_data:
                 filepath = self.recordings_dir / f"session_{sid}_cv.csv"
                 self._export_cv_csv(filepath)
                 exported_files['cv'] = str(filepath)
 
-            # Export engagement data
             if self.engagement_data:
                 filepath = self.recordings_dir / f"session_{sid}_engagement.csv"
                 self._export_engagement_csv(filepath)
                 exported_files['engagement'] = str(filepath)
 
-            # Export PPG data
             if self.ppg_data:
                 filepath = self.recordings_dir / f"session_{sid}_ppg.csv"
                 self._export_ppg_csv(filepath)
@@ -269,25 +218,21 @@ class SessionRecorder:
             return exported_files
 
     def _export_eeg_csv(self, filepath: Path):
-        """Export EEG data to CSV"""
         if not self.eeg_data:
             return
 
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
 
-            # Get band names from first sample
             bands = self.eeg_data[0]['bands']
             channels = self.eeg_data[0]['channels']
 
-            # Header: timestamp, relative_time, CH1_delta, CH1_theta, ..., CH4_gamma
             header = ['timestamp', 'relative_time']
             for ch in channels:
                 for band in bands:
                     header.append(f"{ch}_{band}")
             writer.writerow(header)
 
-            # Data rows
             for sample in self.eeg_data:
                 row = [sample['timestamp'], sample['relative_time']]
                 for ch_values in sample['values']:
@@ -295,20 +240,15 @@ class SessionRecorder:
                 writer.writerow(row)
 
     def _export_cv_csv(self, filepath: Path):
-        """Export CV data to CSV"""
         if not self.cv_data:
             return
 
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
 
-            # Header
             header = ['timestamp', 'relative_time',
-                      # Face features
                       'mouth_openness', 'brow_raise', 'head_yaw', 'head_roll', 'smile_curvature',
-                      # Gaze
                       'gaze_x', 'gaze_y', 'gaze_confidence',
-                      # Hands
                       'left_hand_present', 'left_palm_x', 'left_palm_y', 'left_pinch', 'left_gesture',
                       'right_hand_present', 'right_palm_x', 'right_palm_y', 'right_pinch', 'right_gesture']
             writer.writerow(header)
@@ -346,7 +286,6 @@ class SessionRecorder:
                 writer.writerow(row)
 
     def _export_engagement_csv(self, filepath: Path):
-        """Export engagement data to CSV"""
         if not self.engagement_data:
             return
 
@@ -364,7 +303,6 @@ class SessionRecorder:
                 writer.writerow(row)
 
     def _export_ppg_csv(self, filepath: Path):
-        """Export PPG data to CSV"""
         if not self.ppg_data:
             return
 
@@ -382,7 +320,6 @@ class SessionRecorder:
                 ])
 
     def list_sessions(self) -> List[Dict[str, Any]]:
-        """List all recorded sessions"""
         sessions = []
         for f in self.recordings_dir.glob("session_*.json"):
             try:
@@ -400,7 +337,6 @@ class SessionRecorder:
         return sorted(sessions, key=lambda x: x.get('start_time', ''), reverse=True)
 
     def load_session(self, session_id: str) -> Dict[str, Any]:
-        """Load a previously recorded session"""
         filepath = self.recordings_dir / f"session_{session_id}.json"
         if not filepath.exists():
             raise FileNotFoundError(f"Session {session_id} not found")
@@ -409,11 +345,9 @@ class SessionRecorder:
             return json.load(f)
 
     def is_recording(self) -> bool:
-        """Check if currently recording"""
         return self.recording
 
     def get_status(self) -> Dict[str, Any]:
-        """Get current recording status"""
         with self.lock:
             if not self.recording:
                 return {'recording': False}

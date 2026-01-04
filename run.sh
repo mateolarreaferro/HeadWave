@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# BioMus - Simple startup script
+# HeadWave - Simple startup script
 
 # Activate virtual environment
 source venv/bin/activate

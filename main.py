@@ -12,12 +12,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Fil
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from openbci_service import GanglionService
-from simulator_service import SimulatorService
+from src.openbci_service import GanglionService
+from src.simulator_service import SimulatorService
 
 # Try to import camera service (optional if mediapipe unavailable)
 try:
-    from camera_service import CameraService
+    from src.camera_service import CameraService
     camera_service = CameraService()
     CAMERA_AVAILABLE = True
 except Exception as e:
@@ -27,7 +27,7 @@ except Exception as e:
 
 # Import session recorder
 try:
-    from session_recorder import SessionRecorder
+    from src.session_recorder import SessionRecorder
     session_recorder = SessionRecorder()
     RECORDING_AVAILABLE = True
 except Exception as e:
@@ -37,7 +37,7 @@ except Exception as e:
 
 # Import MIDI sender
 try:
-    from midi_sender import MIDISender
+    from src.midi_sender import MIDISender
     midi_sender = MIDISender()
     MIDI_AVAILABLE = True
 except Exception as e:
@@ -47,7 +47,7 @@ except Exception as e:
 
 # Import calibration wizard
 try:
-    from calibration import CalibrationWizard, CurveShaper
+    from src.calibration import CalibrationWizard, CurveShaper
     calibration_wizard = CalibrationWizard()
     CALIBRATION_AVAILABLE = True
 except Exception as e:
@@ -442,7 +442,7 @@ async def api_midi_ports():
     if not MIDI_AVAILABLE:
         return {"ports": [], "available": False}
 
-    from midi_sender import MIDISender
+    from src.midi_sender import MIDISender
     ports = MIDISender.list_ports()
     iac_port = MIDISender.find_iac_port()
 

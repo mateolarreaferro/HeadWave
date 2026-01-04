@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# BioMus Setup Script
+# HeadWave Setup Script
 
-echo "🧠 Setting up BioMus - Ganglion Studio..."
+echo "🧠 Setting up HeadWave - Ganglion Studio..."
 echo ""
 
 # Check if Python is installed
