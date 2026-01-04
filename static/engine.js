@@ -1,5 +1,5 @@
-// audio.js - Web Audio Synthesis Engine for HeadWave
-// Modular routing system with EEG/CV integration
+// engine.js - Unified Node Engine for HeadWave
+// Audio + Visual synthesis with EEG/CV integration
 
 const AudioEngine = {
   // Audio context
@@ -168,6 +168,135 @@ const AudioEngine = {
       inputs: ['audio'],
       outputs: [],
       params: {}
+    },
+
+    // Visual nodes
+    canvas: {
+      name: 'Canvas',
+      category: 'visual_output',
+      inputs: ['draw'],
+      outputs: [],
+      params: {
+        background: { default: '#0d1117' },
+        trails: { default: 0, min: 0, max: 100 }
+      }
+    },
+    ellipse: {
+      name: 'Ellipse',
+      category: 'visual',
+      inputs: ['x', 'y', 'width', 'height', 'color', 'rotation'],
+      outputs: ['draw'],
+      params: {
+        x: { default: 0.5, min: 0, max: 1 },
+        y: { default: 0.5, min: 0, max: 1 },
+        width: { default: 0.1, min: 0, max: 1 },
+        height: { default: 0.1, min: 0, max: 1 },
+        rotation: { default: 0, min: 0, max: 360 },
+        fill: { default: '#ffffff' },
+        stroke: { default: 'none' },
+        strokeWeight: { default: 2, min: 0, max: 20 }
+      }
+    },
+    rect: {
+      name: 'Rectangle',
+      category: 'visual',
+      inputs: ['x', 'y', 'width', 'height', 'color', 'rotation'],
+      outputs: ['draw'],
+      params: {
+        x: { default: 0.5, min: 0, max: 1 },
+        y: { default: 0.5, min: 0, max: 1 },
+        width: { default: 0.1, min: 0, max: 1 },
+        height: { default: 0.1, min: 0, max: 1 },
+        rotation: { default: 0, min: 0, max: 360 },
+        cornerRadius: { default: 0, min: 0, max: 100 },
+        fill: { default: '#ffffff' },
+        stroke: { default: 'none' },
+        strokeWeight: { default: 2, min: 0, max: 20 }
+      }
+    },
+    line: {
+      name: 'Line',
+      category: 'visual',
+      inputs: ['x1', 'y1', 'x2', 'y2', 'color'],
+      outputs: ['draw'],
+      params: {
+        x1: { default: 0.25, min: 0, max: 1 },
+        y1: { default: 0.5, min: 0, max: 1 },
+        x2: { default: 0.75, min: 0, max: 1 },
+        y2: { default: 0.5, min: 0, max: 1 },
+        stroke: { default: '#ffffff' },
+        strokeWeight: { default: 2, min: 0, max: 20 }
+      }
+    },
+    polygon: {
+      name: 'Polygon',
+      category: 'visual',
+      inputs: ['x', 'y', 'radius', 'color', 'rotation'],
+      outputs: ['draw'],
+      params: {
+        x: { default: 0.5, min: 0, max: 1 },
+        y: { default: 0.5, min: 0, max: 1 },
+        radius: { default: 0.1, min: 0, max: 0.5 },
+        sides: { default: 6, min: 3, max: 12 },
+        rotation: { default: 0, min: 0, max: 360 },
+        fill: { default: '#ffffff' },
+        stroke: { default: 'none' },
+        strokeWeight: { default: 2, min: 0, max: 20 }
+      }
+    },
+    text: {
+      name: 'Text',
+      category: 'visual',
+      inputs: ['x', 'y', 'color', 'size'],
+      outputs: ['draw'],
+      params: {
+        text: { default: 'Hello' },
+        x: { default: 0.5, min: 0, max: 1 },
+        y: { default: 0.5, min: 0, max: 1 },
+        size: { default: 32, min: 8, max: 200 },
+        fill: { default: '#ffffff' },
+        align: { default: 'center', options: ['left', 'center', 'right'] }
+      }
+    },
+    color: {
+      name: 'Color',
+      category: 'visual',
+      inputs: ['h', 's', 'b', 'a'],
+      outputs: ['color'],
+      params: {
+        h: { default: 180, min: 0, max: 360 },
+        s: { default: 70, min: 0, max: 100 },
+        b: { default: 80, min: 0, max: 100 },
+        a: { default: 255, min: 0, max: 255 }
+      }
+    },
+    transform: {
+      name: 'Transform',
+      category: 'visual',
+      inputs: ['draw', 'x', 'y', 'rotation', 'scale'],
+      outputs: ['draw'],
+      params: {
+        x: { default: 0, min: -1, max: 1 },
+        y: { default: 0, min: -1, max: 1 },
+        rotation: { default: 0, min: 0, max: 360 },
+        scale: { default: 1, min: 0.1, max: 5 }
+      }
+    },
+    particles: {
+      name: 'Particles',
+      category: 'visual',
+      inputs: ['x', 'y', 'color', 'speed', 'size'],
+      outputs: ['draw'],
+      params: {
+        x: { default: 0.5, min: 0, max: 1 },
+        y: { default: 0.5, min: 0, max: 1 },
+        count: { default: 50, min: 1, max: 500 },
+        size: { default: 5, min: 1, max: 50 },
+        speed: { default: 1, min: 0, max: 5 },
+        spread: { default: 0.2, min: 0, max: 1 },
+        fill: { default: '#ffffff' },
+        lifetime: { default: 2, min: 0.1, max: 10 }
+      }
     }
   },
 
@@ -513,10 +642,30 @@ const AudioEngine = {
   },
 
   // Disconnect nodes
-  disconnect: function(fromNodeId, toNodeId) {
+  disconnect: function(fromNodeId, toNodeId, toInput) {
     this._disconnectNodes(fromNodeId, toNodeId);
+
+    // Find the connection being removed to get the target input
+    const conn = this.connections.find(c =>
+      c.fromNode === fromNodeId && c.toNode === toNodeId &&
+      (toInput === undefined || c.toInput === toInput)
+    );
+
+    // Reset the target parameter to its default value
+    if (conn) {
+      const toNode = this.nodes[toNodeId];
+      if (toNode) {
+        const nodeType = this.nodeTypes[toNode.type];
+        if (nodeType?.params?.[conn.toInput]) {
+          const defaultValue = nodeType.params[conn.toInput].default;
+          this.setParam(toNodeId, conn.toInput, defaultValue);
+        }
+      }
+    }
+
     this.connections = this.connections.filter(c =>
-      !(c.fromNode === fromNodeId && c.toNode === toNodeId)
+      !(c.fromNode === fromNodeId && c.toNode === toNodeId &&
+        (toInput === undefined || c.toInput === toInput))
     );
   },
 
@@ -683,25 +832,34 @@ const AudioEngine = {
       const targetNode = this.nodes[conn.toNode];
       if (!targetNode) continue;
 
-      // Skip if target is a scale node (handled in step 2)
       if (targetNode.type === 'scale') continue;
-
-      // Skip if target has no audio node
-      if (!targetNode.audioNode) continue;
 
       const value = modulatorNode.outputValue;
       const input = conn.toInput;
-
-      // Apply value to target parameter
-      // If source is a Range node, value is already in the correct range
-      // If source is a raw modulator (0-1), apply default scaling
       const isFromRange = modulatorNode.type === 'scale';
+      const nodeType = this.nodeTypes[targetNode.type];
+      const isVisualNode = nodeType && (nodeType.category === 'visual' || nodeType.category === 'visual_output');
+
+      if (isVisualNode) {
+        if (input in targetNode.params) {
+          const paramConfig = nodeType.params[input];
+          if (paramConfig && paramConfig.min !== undefined) {
+            targetNode.params[input] = isFromRange ? value :
+              paramConfig.min + value * (paramConfig.max - paramConfig.min);
+          } else {
+            targetNode.params[input] = value;
+          }
+        }
+        continue;
+      }
+
+      if (!targetNode.audioNode) continue;
 
       if (input === 'frequency') {
         const freq = isFromRange ? value : (100 + value * 2000);
         targetNode.audioNode.frequency?.setValueAtTime(freq, this.ctx.currentTime);
       } else if (input === 'gain') {
-        const gain = isFromRange ? (value / 1000) : value; // Scale down if from range
+        const gain = isFromRange ? (value / 1000) : value;
         targetNode.audioNode.gain?.setValueAtTime(Math.min(gain, 2), this.ctx.currentTime);
       } else if (input === 'Q') {
         const q = isFromRange ? value : (0.5 + value * 10);
@@ -710,8 +868,7 @@ const AudioEngine = {
         const detune = isFromRange ? value : (value * 1200 - 600);
         targetNode.audioNode.detune?.setValueAtTime(detune, this.ctx.currentTime);
       } else if (input === 'speed') {
-        const speed = isFromRange ? value : (0.25 + value * 3.75); // 0.25x to 4x
-        // For sampler nodes, speed is on the source
+        const speed = isFromRange ? value : (0.25 + value * 3.75);
         if (targetNode.audioNode._source?.playbackRate) {
           targetNode.audioNode._source.playbackRate.setValueAtTime(speed, this.ctx.currentTime);
         } else if (targetNode.audioNode.playbackRate) {
@@ -719,6 +876,66 @@ const AudioEngine = {
         }
       }
     }
+  },
+
+  // Get all visual nodes for rendering
+  getVisualNodes: function() {
+    const visualNodes = [];
+    for (const [id, node] of Object.entries(this.nodes)) {
+      const nodeType = this.nodeTypes[node.type];
+      if (nodeType && (nodeType.category === 'visual' || nodeType.category === 'visual_output')) {
+        visualNodes.push({ id, ...node });
+      }
+    }
+    return visualNodes;
+  },
+
+  // Get only visual nodes connected to the canvas
+  getConnectedVisualNodes: function() {
+    const canvasNode = this.getCanvasNode();
+    if (!canvasNode) return [];
+
+    // Find all nodes connected to canvas (trace back through 'draw' connections)
+    const connectedIds = new Set();
+
+    const traceConnections = (nodeId) => {
+      // Find all connections where this node is the target
+      for (const conn of this.connections) {
+        if (conn.toNode === nodeId && conn.toInput === 'draw') {
+          const fromNode = this.nodes[conn.fromNode];
+          if (fromNode) {
+            const nodeType = this.nodeTypes[fromNode.type];
+            if (nodeType && nodeType.category === 'visual') {
+              connectedIds.add(conn.fromNode);
+              // Recursively trace (for transform nodes that chain)
+              traceConnections(conn.fromNode);
+            }
+          }
+        }
+      }
+    };
+
+    traceConnections(canvasNode.id);
+
+    // Return the connected nodes
+    const result = [];
+    for (const id of connectedIds) {
+      const node = this.nodes[id];
+      if (node) {
+        result.push({ id, ...node });
+      }
+    }
+    return result;
+  },
+
+  // Get canvas node if exists
+  getCanvasNode: function() {
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.type === 'canvas') {
+        return { id, ...node };
+      }
+    }
+    return null;
   },
 
   // Get analyzer data for visualization

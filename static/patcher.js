@@ -23,9 +23,15 @@ const Patcher = {
   // Layout
   nodeWidth: 180,
   nodeHeight: 100,
+  canvasNodeWidth: 280,
+  canvasNodeHeight: 220,
   portRadius: 8,
   headerHeight: 32,
   cornerRadius: 12,
+
+  // Embedded canvas for visual output
+  embeddedCanvas: null,
+  embeddedP5: null,
 
   // Theme
   theme: {
@@ -39,7 +45,9 @@ const Patcher = {
       processor: '#06b6d4',   // Cyan
       modulator: '#a855f7',   // Purple
       output: '#22c55e',      // Green
-      data: '#3b82f6'         // Blue
+      data: '#3b82f6',        // Blue
+      visual: '#ec4899',      // Pink
+      visual_output: '#f43f5e' // Rose
     },
     text: {
       primary: '#f0f6fc',
@@ -159,6 +167,34 @@ const Patcher = {
     btn.addEventListener('click', () => this.toggleFullscreen());
     this.container.appendChild(btn);
     this.fullscreenBtn = btn;
+
+    const visualBtn = document.createElement('button');
+    visualBtn.className = 'patcher-visual-btn';
+    visualBtn.innerHTML = '▣';
+    visualBtn.title = 'Open Visual Preview';
+    visualBtn.style.cssText = `
+      position: absolute; top: 10px; right: 50px; z-index: 100;
+      width: 32px; height: 32px; border-radius: 6px;
+      background: ${this.theme.bg.tertiary}; border: 1px solid ${this.theme.node.border};
+      color: ${this.theme.accent.visual}; font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s ease;
+    `;
+    visualBtn.addEventListener('mouseenter', () => {
+      visualBtn.style.background = this.theme.accent.visual + '20';
+      visualBtn.style.borderColor = this.theme.accent.visual;
+    });
+    visualBtn.addEventListener('mouseleave', () => {
+      visualBtn.style.background = this.theme.bg.tertiary;
+      visualBtn.style.borderColor = this.theme.node.border;
+    });
+    visualBtn.addEventListener('click', () => {
+      if (typeof VisualRenderer !== 'undefined') {
+        VisualRenderer.toggleFullscreen();
+      }
+    });
+    this.container.appendChild(visualBtn);
+    this.visualBtn = visualBtn;
   },
 
   // Toggle fullscreen mode
@@ -260,12 +296,22 @@ const Patcher = {
     return false;
   },
 
+  // Get node dimensions based on type
+  getNodeDimensions: function(node) {
+    const isCanvasNode = node.type === 'canvas';
+    return {
+      width: isCanvasNode ? this.canvasNodeWidth : this.nodeWidth,
+      height: isCanvasNode ? this.canvasNodeHeight : this.nodeHeight
+    };
+  },
+
   // Get node at position
   getNodeAt: function(x, y) {
     for (let i = this.nodes.length - 1; i >= 0; i--) {
       const node = this.nodes[i];
-      if (x >= node.x && x <= node.x + this.nodeWidth &&
-          y >= node.y && y <= node.y + this.nodeHeight) {
+      const dim = this.getNodeDimensions(node);
+      if (x >= node.x && x <= node.x + dim.width &&
+          y >= node.y && y <= node.y + dim.height) {
         return node;
       }
     }
@@ -276,7 +322,8 @@ const Patcher = {
   getInputPorts: function(node) {
     const ports = [];
     const inputs = node.inputs || [];
-    const spacing = this.nodeWidth / (inputs.length + 1);
+    const dim = this.getNodeDimensions(node);
+    const spacing = dim.width / (inputs.length + 1);
     for (let i = 0; i < inputs.length; i++) {
       ports.push({ name: inputs[i], x: node.x + spacing * (i + 1), y: node.y });
     }
@@ -286,9 +333,10 @@ const Patcher = {
   getOutputPorts: function(node) {
     const ports = [];
     const outputs = node.outputs || [];
-    const spacing = this.nodeWidth / (outputs.length + 1);
+    const dim = this.getNodeDimensions(node);
+    const spacing = dim.width / (outputs.length + 1);
     for (let i = 0; i < outputs.length; i++) {
-      ports.push({ name: outputs[i], x: node.x + spacing * (i + 1), y: node.y + this.nodeHeight });
+      ports.push({ name: outputs[i], x: node.x + spacing * (i + 1), y: node.y + dim.height });
     }
     return ports;
   },
@@ -348,7 +396,16 @@ const Patcher = {
     const index = this.cables.indexOf(cable);
     if (index === -1) return;
 
-    AudioEngine.disconnect(cable.fromNode, cable.toNode);
+    // Reset the target parameter to default in patcher's node copy too
+    const toNode = this.nodes.find(n => n.id === cable.toNode);
+    if (toNode) {
+      const nodeType = AudioEngine.nodeTypes[toNode.type];
+      if (nodeType?.params?.[cable.toPort]) {
+        toNode.params[cable.toPort] = nodeType.params[cable.toPort].default;
+      }
+    }
+
+    AudioEngine.disconnect(cable.fromNode, cable.toNode, cable.toPort);
     this.cables.splice(index, 1);
   },
 
@@ -433,7 +490,14 @@ const Patcher = {
     const pos = this.getMousePos(e);
     const node = this.getNodeAt(pos.x, pos.y);
     if (node) {
-      this.showParamsDialog(node);
+      // For canvas nodes, double-click opens fullscreen visual
+      if (node.type === 'canvas') {
+        if (typeof VisualRenderer !== 'undefined') {
+          VisualRenderer.enterFullscreen();
+        }
+      } else {
+        this.showParamsDialog(node);
+      }
     }
   },
 
@@ -480,81 +544,170 @@ const Patcher = {
       menu._cable = cable;
     } else {
       const categories = {
-        'Sources': [
-          { type: 'oscillator', icon: '〜', desc: 'Sine/Saw/Square wave' },
-          { type: 'noise', icon: '⁂', desc: 'White/Pink noise' },
-          { type: 'sampler', icon: '▶', desc: 'Sample player' }
-        ],
-        'Effects': [
-          { type: 'filter', icon: '◇', desc: 'LP/HP/BP filter' },
-          { type: 'gain', icon: '▲', desc: 'Volume control' },
-          { type: 'delay', icon: '◌', desc: 'Echo effect' },
-          { type: 'scale', icon: '↔', desc: 'Map 0-1 to min-max' }
-        ],
-        'Modulators': [
-          { type: 'lfo', icon: '∿', desc: 'Low freq oscillator' },
-          { type: 'eegBand', icon: '◉', desc: 'EEG band power' },
-          { type: 'cvFeature', icon: '◎', desc: 'Face features' },
-          { type: 'handFeature', icon: '✋', desc: 'Hand tracking' }
-        ],
-        'Output': [
-          { type: 'output', icon: '◈', desc: 'Audio output' }
-        ]
+        'Audio': {
+          icon: '♪', color: this.theme.accent.source,
+          items: [
+            { type: 'oscillator', icon: '〜', desc: 'Sine/Saw/Square' },
+            { type: 'noise', icon: '⁂', desc: 'White/Pink noise' },
+            { type: 'sampler', icon: '▶', desc: 'Sample player' },
+            { type: 'filter', icon: '◇', desc: 'LP/HP/BP filter' },
+            { type: 'gain', icon: '▲', desc: 'Volume' },
+            { type: 'delay', icon: '◌', desc: 'Echo' }
+          ]
+        },
+        'Modulators': {
+          icon: '◉', color: this.theme.accent.modulator,
+          items: [
+            { type: 'lfo', icon: '∿', desc: 'Low freq oscillator' },
+            { type: 'eegBand', icon: '◉', desc: 'EEG band power' },
+            { type: 'cvFeature', icon: '◎', desc: 'Face features' },
+            { type: 'handFeature', icon: '✋', desc: 'Hand tracking' },
+            { type: 'scale', icon: '↔', desc: 'Map range' }
+          ]
+        },
+        'Visual': {
+          icon: '●', color: this.theme.accent.visual,
+          items: [
+            { type: 'ellipse', icon: '●', desc: 'Ellipse' },
+            { type: 'rect', icon: '■', desc: 'Rectangle' },
+            { type: 'polygon', icon: '⬡', desc: 'Polygon' },
+            { type: 'line', icon: '╱', desc: 'Line' },
+            { type: 'text', icon: 'A', desc: 'Text' },
+            { type: 'particles', icon: '✧', desc: 'Particles' },
+            { type: 'color', icon: '◐', desc: 'Color' },
+            { type: 'transform', icon: '⟳', desc: 'Transform' }
+          ]
+        },
+        'Output': {
+          icon: '◈', color: this.theme.accent.output,
+          items: [
+            { type: 'output', icon: '◈', desc: 'Audio output' },
+            { type: 'canvas', icon: '▣', desc: 'Visual output' }
+          ]
+        }
       };
 
+      const catItemStyle = `
+        padding: 10px 16px; cursor: pointer; font-size: 14px; color: ${this.theme.text.primary};
+        display: flex; align-items: center; gap: 10px; transition: background 0.1s;
+      `;
+
       let html = '';
-      for (const [cat, items] of Object.entries(categories)) {
-        html += `<div style="${menuHeaderStyle}">${cat}</div>`;
-        for (const item of items) {
-          const name = AudioEngine.nodeTypes[item.type]?.name || item.type;
-          html += `
-            <div style="${menuItemStyle}" class="menu-item" data-action="add" data-type="${item.type}">
-              <span style="display: inline-block; width: 20px; text-align: center;">${item.icon}</span>
-              <span>${name}</span>
-              <span style="float: right; color: ${this.theme.text.muted}; font-size: 11px;">${item.desc}</span>
-            </div>
-          `;
-        }
+      for (const [catName, catData] of Object.entries(categories)) {
+        html += `
+          <div style="${catItemStyle}" class="menu-category" data-category="${catName}">
+            <span style="color: ${catData.color}; font-size: 16px;">${catData.icon}</span>
+            <span style="flex: 1;">${catName}</span>
+            <span style="color: ${this.theme.text.muted};">›</span>
+          </div>
+        `;
       }
       menu.innerHTML = html;
+      menu._categories = categories;
+      menu._pos = pos;
     }
 
     document.body.appendChild(menu);
 
-    // Style hover
+    const self = this;
+
+    // Style hover for menu items
     menu.querySelectorAll('.menu-item').forEach(item => {
       item.addEventListener('mouseenter', () => item.style.background = this.theme.bg.tertiary);
       item.addEventListener('mouseleave', () => item.style.background = 'transparent');
     });
 
+    // Style hover for categories
+    menu.querySelectorAll('.menu-category').forEach(cat => {
+      cat.addEventListener('mouseenter', () => cat.style.background = this.theme.bg.tertiary);
+      cat.addEventListener('mouseleave', () => cat.style.background = 'transparent');
+    });
+
     // Handle clicks
     menu.addEventListener('click', (evt) => {
       const item = evt.target.closest('.menu-item');
-      if (!item) return;
+      const category = evt.target.closest('.menu-category');
 
-      const action = item.dataset.action;
-      if (action === 'add') {
-        this.addNode(item.dataset.type, pos.x, pos.y);
-      } else if (action === 'delete' && node) {
-        this.removeNode(node.id);
-      } else if (action === 'delete-cable' && menu._cable) {
-        this.removeCable(menu._cable);
-      } else if (action === 'params' && node) {
-        this.showParamsDialog(node);
+      if (item) {
+        const action = item.dataset.action;
+        if (action === 'add') {
+          this.addNode(item.dataset.type, menu._pos.x, menu._pos.y);
+        } else if (action === 'delete' && node) {
+          this.removeNode(node.id);
+        } else if (action === 'delete-cable' && menu._cable) {
+          this.removeCable(menu._cable);
+        } else if (action === 'params' && node) {
+          this.showParamsDialog(node);
+        }
+        document.querySelectorAll('.patcher-menu').forEach(m => m.remove());
+      } else if (category && menu._categories) {
+        const catName = category.dataset.category;
+        const catData = menu._categories[catName];
+        if (catData) {
+          this.showSubMenu(menu, category, catData, menu._pos);
+        }
       }
-      menu.remove();
     });
 
     // Close on outside click
     setTimeout(() => {
       const close = (evt) => {
-        if (!menu.contains(evt.target)) {
-          menu.remove();
+        if (!evt.target.closest('.patcher-menu')) {
+          document.querySelectorAll('.patcher-menu').forEach(m => m.remove());
           document.removeEventListener('click', close);
         }
       };
       document.addEventListener('click', close);
     }, 0);
+  },
+
+  showSubMenu: function(parentMenu, categoryEl, catData, pos) {
+    document.querySelectorAll('.patcher-submenu').forEach(m => m.remove());
+
+    const rect = categoryEl.getBoundingClientRect();
+    const submenu = document.createElement('div');
+    submenu.className = 'patcher-menu patcher-submenu';
+    submenu.style.cssText = `
+      position: fixed; left: ${rect.right + 4}px; top: ${rect.top}px;
+      background: ${this.theme.bg.secondary}; border: 1px solid ${this.theme.node.border};
+      border-radius: 8px; padding: 6px 0; z-index: 10001; min-width: 180px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4); font-family: -apple-system, system-ui, sans-serif;
+    `;
+
+    const menuItemStyle = `
+      padding: 8px 14px; cursor: pointer; font-size: 13px; color: ${this.theme.text.primary};
+      display: flex; align-items: center; gap: 8px; transition: background 0.1s;
+    `;
+
+    let html = '';
+    for (const item of catData.items) {
+      const name = AudioEngine.nodeTypes[item.type]?.name || item.type;
+      html += `
+        <div style="${menuItemStyle}" class="menu-item" data-action="add" data-type="${item.type}">
+          <span style="width: 18px; text-align: center; color: ${catData.color};">${item.icon}</span>
+          <span style="flex: 1;">${name}</span>
+          <span style="color: ${this.theme.text.muted}; font-size: 11px;">${item.desc}</span>
+        </div>
+      `;
+    }
+    submenu.innerHTML = html;
+    submenu._pos = pos;
+
+    document.body.appendChild(submenu);
+
+    submenu.querySelectorAll('.menu-item').forEach(item => {
+      item.addEventListener('mouseenter', () => item.style.background = this.theme.bg.tertiary);
+      item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+    });
+
+    const self = this;
+    submenu.addEventListener('click', (evt) => {
+      const item = evt.target.closest('.menu-item');
+      if (item && item.dataset.action === 'add') {
+        self.addNode(item.dataset.type, pos.x, pos.y);
+        document.querySelectorAll('.patcher-menu').forEach(m => m.remove());
+      }
+    });
   },
 
   // Parameters dialog
@@ -749,8 +902,9 @@ const Patcher = {
   drawNode: function(node) {
     const ctx = this.ctx;
     const { x, y } = node;
-    const w = this.nodeWidth;
-    const h = this.nodeHeight;
+    const isCanvasNode = node.type === 'canvas';
+    const w = isCanvasNode ? this.canvasNodeWidth : this.nodeWidth;
+    const h = isCanvasNode ? this.canvasNodeHeight : this.nodeHeight;
     const r = this.cornerRadius;
     const hh = this.headerHeight;
     const isSelected = node.id === this.selectedNode;
@@ -816,33 +970,59 @@ const Patcher = {
       ctx.textAlign = 'left';
     }
 
-    // Params preview
-    ctx.fillStyle = this.theme.text.secondary;
-    ctx.font = '11px -apple-system, system-ui, sans-serif';
-    let py = y + hh + 14;
+    // Special rendering for canvas nodes - render visual output
+    if (isCanvasNode) {
+      const previewX = x + 8;
+      const previewY = y + hh + 8;
+      const previewW = w - 16;
+      const previewH = h - hh - 40;
 
-    // Special display for sampler nodes
-    if (node.type === 'sampler') {
-      const hasBuffer = AudioEngine.sampleBuffers && AudioEngine.sampleBuffers[node.id];
-      if (hasBuffer) {
-        ctx.fillStyle = '#22c55e';
-        ctx.fillText('✓ Sample loaded', x + 12, py);
-        py += 16;
-        ctx.fillStyle = this.theme.text.secondary;
-        ctx.fillText(`speed: ${node.params.speed?.toFixed(2) || 1}`, x + 12, py);
-      } else {
-        ctx.fillStyle = this.theme.text.muted;
-        ctx.fillText('Double-click to load', x + 12, py);
-        py += 16;
-        ctx.fillText('audio file...', x + 12, py);
+      // Draw preview background
+      ctx.fillStyle = node.params.background || '#0d1117';
+      ctx.beginPath();
+      ctx.roundRect(previewX, previewY, previewW, previewH, 6);
+      ctx.fill();
+
+      // Render visual nodes into this area
+      if (typeof VisualRenderer !== 'undefined') {
+        VisualRenderer.renderToContext(ctx, previewX, previewY, previewW, previewH);
       }
-    } else {
-      const paramKeys = Object.keys(node.params).slice(0, 2);
-      for (const key of paramKeys) {
-        let val = node.params[key];
-        if (typeof val === 'number') val = val.toFixed(1);
-        ctx.fillText(`${key}: ${val}`, x + 12, py);
-        py += 16;
+
+      // Fullscreen button hint
+      ctx.fillStyle = this.theme.text.muted;
+      ctx.font = '10px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Double-click for fullscreen', x + w/2, y + h - 14);
+      ctx.textAlign = 'left';
+    }
+    // Params preview for other nodes
+    else {
+      ctx.fillStyle = this.theme.text.secondary;
+      ctx.font = '11px -apple-system, system-ui, sans-serif';
+      let py = y + hh + 14;
+
+      if (node.type === 'sampler') {
+        const hasBuffer = AudioEngine.sampleBuffers && AudioEngine.sampleBuffers[node.id];
+        if (hasBuffer) {
+          ctx.fillStyle = '#22c55e';
+          ctx.fillText('✓ Sample loaded', x + 12, py);
+          py += 16;
+          ctx.fillStyle = this.theme.text.secondary;
+          ctx.fillText(`speed: ${node.params.speed?.toFixed(2) || 1}`, x + 12, py);
+        } else {
+          ctx.fillStyle = this.theme.text.muted;
+          ctx.fillText('Double-click to load', x + 12, py);
+          py += 16;
+          ctx.fillText('audio file...', x + 12, py);
+        }
+      } else {
+        const paramKeys = Object.keys(node.params).slice(0, 2);
+        for (const key of paramKeys) {
+          let val = node.params[key];
+          if (typeof val === 'number') val = val.toFixed(1);
+          ctx.fillText(`${key}: ${val}`, x + 12, py);
+          py += 16;
+        }
       }
     }
 
