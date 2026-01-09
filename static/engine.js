@@ -26,10 +26,20 @@ const AudioEngine = {
   data: {
     bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 },
     cv: { mouth: 0, yaw: 0, roll: 0, smile: 0 },
-    gaze: { x: 0, y: 0 },
+    gaze: { x: 0, y: 0, confidence: 0 },
     hands: { left: null, right: null },
     engagement: 0
   },
+
+  // Recording state
+  recording: {
+    isRecording: false,
+    startTime: null,
+    duration: 0
+  },
+
+  // Visualization data buffers (per node ID)
+  vizData: {},
 
   // Node type definitions
   nodeTypes: {
@@ -135,7 +145,21 @@ const AudioEngine = {
       inputs: [],
       outputs: ['signal'],
       params: {
-        feature: { default: 'mouth', options: ['mouth', 'yaw', 'roll', 'smile', 'gaze_x', 'gaze_y', 'engagement'] },
+        feature: {
+          default: 'mouth',
+          options: [
+            'mouth',          // Mouth openness (0-1)
+            'yaw',            // Head left/right rotation
+            'roll',           // Head tilt
+            'roll_relative',  // Head tilt normalized (0-1)
+            'smile',          // Smile curvature
+            'brow',           // Eyebrow raise
+            'gaze_x',         // Eye gaze horizontal (-1 to 1 -> 0-1)
+            'gaze_y',         // Eye gaze vertical (-1 to 1 -> 0-1)
+            'gaze_confidence', // Eye tracking confidence
+            'engagement'      // Derived engagement metric
+          ]
+        },
         smoothing: { default: 0.1, min: 0, max: 1 }
       }
     },
@@ -168,6 +192,90 @@ const AudioEngine = {
       inputs: ['audio'],
       outputs: [],
       params: {}
+    },
+
+    // Recording node
+    recording: {
+      name: 'Recording',
+      category: 'output',
+      inputs: ['trigger'],
+      outputs: ['status'],
+      params: {
+        autoStop: { default: 0, min: 0, max: 600 },  // Auto-stop after X seconds (0 = disabled)
+        mode: { default: 'toggle', options: ['toggle', 'gate'] }  // toggle = click to start/stop, gate = high = record
+      }
+    },
+
+    // Sender nodes (OSC/MIDI output)
+    oscSender: {
+      name: 'OSC Send',
+      category: 'sender',
+      inputs: ['value'],
+      outputs: [],
+      params: {
+        address: { default: '/custom/value' },
+        ip: { default: '127.0.0.1' },
+        port: { default: 9000, min: 1024, max: 65535 }
+      }
+    },
+
+    midiCCSender: {
+      name: 'MIDI CC',
+      category: 'sender',
+      inputs: ['value'],
+      outputs: [],
+      params: {
+        cc: { default: 1, min: 0, max: 127 },
+        channel: { default: 1, min: 1, max: 16 },
+        scale: { default: 127, min: 1, max: 127 }  // Max value to scale to
+      }
+    },
+
+    midiNoteSender: {
+      name: 'MIDI Note',
+      category: 'sender',
+      inputs: ['trigger', 'velocity'],
+      outputs: [],
+      params: {
+        note: { default: 60, min: 0, max: 127 },
+        channel: { default: 1, min: 1, max: 16 },
+        duration: { default: 100, min: 10, max: 5000 }  // Duration in ms
+      }
+    },
+
+    // Visualization nodes
+    fftViz: {
+      name: 'FFT Viz',
+      category: 'visualization',
+      inputs: [],
+      outputs: ['signal'],
+      params: {
+        channel: { default: 1, min: 1, max: 8 },
+        windowSec: { default: 1, min: 0.5, max: 4 },
+        colorScheme: { default: 'cyan', options: ['cyan', 'purple', 'green', 'orange'] }
+      }
+    },
+
+    timeSeriesViz: {
+      name: 'Time Series',
+      category: 'visualization',
+      inputs: [],
+      outputs: ['signal'],
+      params: {
+        channel: { default: 1, min: 1, max: 8 },
+        windowSec: { default: 4, min: 1, max: 10 },
+        scale: { default: 100, min: 10, max: 500 }
+      }
+    },
+
+    bandsViz: {
+      name: 'Bands Viz',
+      category: 'visualization',
+      inputs: [],
+      outputs: ['delta', 'theta', 'alpha', 'beta', 'gamma'],
+      params: {
+        displayMode: { default: 'bars', options: ['bars', 'radar', 'lines'] }
+      }
     },
 
     // Visual nodes
@@ -372,6 +480,91 @@ const AudioEngine = {
       this.masterGain.gain.setValueAtTime(this.muted ? 0 : this.masterVolume, this.ctx.currentTime);
     }
     return this.muted;
+  },
+
+  // -------- Recording Control --------
+  startRecording: async function() {
+    if (this.recording.isRecording) return false;
+
+    try {
+      const response = await fetch('/api/recording/start', { method: 'POST' });
+      if (response.ok) {
+        this.recording.isRecording = true;
+        this.recording.startTime = Date.now();
+        this.recording.duration = 0;
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+    }
+    return false;
+  },
+
+  stopRecording: async function() {
+    if (!this.recording.isRecording) return false;
+
+    try {
+      const response = await fetch('/api/recording/stop', { method: 'POST' });
+      if (response.ok) {
+        this.recording.isRecording = false;
+        this.recording.duration = (Date.now() - this.recording.startTime) / 1000;
+        this.recording.startTime = null;
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to stop recording:', err);
+    }
+    return false;
+  },
+
+  toggleRecording: async function() {
+    if (this.recording.isRecording) {
+      return await this.stopRecording();
+    } else {
+      return await this.startRecording();
+    }
+  },
+
+  getRecordingDuration: function() {
+    if (!this.recording.isRecording || !this.recording.startTime) return 0;
+    return (Date.now() - this.recording.startTime) / 1000;
+  },
+
+  // -------- Sender Methods --------
+  sendOSC: async function(address, value, ip = '127.0.0.1', port = 9000) {
+    try {
+      await fetch('/api/node/osc/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, value, ip, port })
+      });
+    } catch (err) {
+      console.error('OSC send error:', err);
+    }
+  },
+
+  sendMIDICC: async function(cc, value, channel = 1) {
+    try {
+      await fetch('/api/node/midi/cc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cc, value, channel })
+      });
+    } catch (err) {
+      console.error('MIDI CC send error:', err);
+    }
+  },
+
+  sendMIDINote: async function(note, velocity, channel = 1, duration = 100) {
+    try {
+      await fetch('/api/node/midi/note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note, velocity, channel, duration })
+      });
+    } catch (err) {
+      console.error('MIDI Note send error:', err);
+    }
   },
 
   // Create a node
@@ -774,10 +967,38 @@ const AudioEngine = {
       } else if (node.type === 'cvFeature') {
         const feature = node.params.feature;
         let value = 0;
-        if (feature === 'gaze_x') value = (this.data.gaze.x + 1) / 2;
-        else if (feature === 'gaze_y') value = (this.data.gaze.y + 1) / 2;
-        else if (feature === 'engagement') value = Math.min(this.data.engagement / 5, 1);
-        else value = this.data.cv[feature] || 0;
+
+        // Map feature names to data sources
+        if (feature === 'gaze_x') {
+          value = (this.data.gaze.x + 1) / 2; // -1 to 1 -> 0 to 1
+        } else if (feature === 'gaze_y') {
+          value = (this.data.gaze.y + 1) / 2; // -1 to 1 -> 0 to 1
+        } else if (feature === 'gaze_confidence') {
+          value = this.data.gaze.confidence || 0;
+        } else if (feature === 'engagement') {
+          value = Math.min(this.data.engagement / 5, 1);
+        } else if (feature === 'mouth') {
+          value = this.data.cv['mouth_openness'] || this.data.cv['mouth'] || 0;
+        } else if (feature === 'yaw') {
+          value = this.data.cv['head_yaw'] || this.data.cv['yaw'] || 0;
+        } else if (feature === 'roll') {
+          value = this.data.cv['head_roll'] || this.data.cv['roll'] || 0;
+        } else if (feature === 'roll_relative') {
+          value = this.data.cv['head_roll_relative'] || this.data.cv['roll_relative'] || 0;
+        } else if (feature === 'smile') {
+          value = this.data.cv['smile_curvature'] || this.data.cv['smile'] || 0;
+        } else if (feature === 'brow') {
+          value = this.data.cv['brow_raise'] || this.data.cv['brow'] || 0;
+        } else {
+          value = this.data.cv[feature] || 0;
+        }
+
+        // Apply smoothing
+        const smoothing = node.params.smoothing || 0.1;
+        if (node.outputValue !== undefined && smoothing > 0) {
+          value = node.outputValue * smoothing + value * (1 - smoothing);
+        }
+
         node.outputValue = value;
       } else if (node.type === 'handFeature') {
         const hand = node.params.hand;
@@ -796,6 +1017,131 @@ const AudioEngine = {
           else if (feature === 'z') value = Math.min(Math.max(handData.palm_z || 0, 0), 1);
         }
         node.outputValue = value;
+      } else if (node.type === 'recording') {
+        // Recording node - check trigger input and control recording
+        const inputConn = this.connections.find(c => c.toNode === id && c.toPort === 'trigger');
+        let triggerValue = 0;
+
+        if (inputConn) {
+          const sourceNode = this.nodes[inputConn.fromNode];
+          if (sourceNode && sourceNode.outputValue !== undefined) {
+            triggerValue = sourceNode.outputValue;
+          }
+        }
+
+        const mode = node.params.mode || 'toggle';
+        const prevTrigger = node._prevTrigger || 0;
+        node._prevTrigger = triggerValue;
+
+        if (mode === 'gate') {
+          // Gate mode: high = record, low = stop
+          if (triggerValue > 0.5 && !this.recording.isRecording) {
+            this.startRecording();
+          } else if (triggerValue <= 0.5 && this.recording.isRecording) {
+            this.stopRecording();
+          }
+        } else {
+          // Toggle mode: rising edge toggles recording
+          if (triggerValue > 0.5 && prevTrigger <= 0.5) {
+            this.toggleRecording();
+          }
+        }
+
+        // Auto-stop check
+        const autoStop = node.params.autoStop || 0;
+        if (autoStop > 0 && this.recording.isRecording) {
+          const duration = this.getRecordingDuration();
+          if (duration >= autoStop) {
+            this.stopRecording();
+          }
+        }
+
+        // Output status (1 = recording, 0 = stopped)
+        node.outputValue = this.recording.isRecording ? 1 : 0;
+      } else if (node.type === 'oscSender') {
+        // OSC Sender - get input value and send via API
+        const inputConn = this.connections.find(c => c.toNode === id && c.toPort === 'value');
+        if (inputConn) {
+          const sourceNode = this.nodes[inputConn.fromNode];
+          if (sourceNode && sourceNode.outputValue !== undefined) {
+            const value = sourceNode.outputValue;
+            // Only send if value changed significantly
+            if (Math.abs(value - (node._lastSent || 0)) > 0.001) {
+              node._lastSent = value;
+              this.sendOSC(node.params.address, value, node.params.ip, node.params.port);
+            }
+          }
+        }
+      } else if (node.type === 'midiCCSender') {
+        // MIDI CC Sender - get input value and send
+        const inputConn = this.connections.find(c => c.toNode === id && c.toPort === 'value');
+        if (inputConn) {
+          const sourceNode = this.nodes[inputConn.fromNode];
+          if (sourceNode && sourceNode.outputValue !== undefined) {
+            const value = Math.round(sourceNode.outputValue * (node.params.scale || 127));
+            const clampedValue = Math.max(0, Math.min(127, value));
+            // Only send if value changed
+            if (clampedValue !== node._lastSent) {
+              node._lastSent = clampedValue;
+              this.sendMIDICC(node.params.cc, clampedValue, node.params.channel);
+            }
+          }
+        }
+      } else if (node.type === 'midiNoteSender') {
+        // MIDI Note Sender - trigger on rising edge
+        const triggerConn = this.connections.find(c => c.toNode === id && c.toPort === 'trigger');
+        const velocityConn = this.connections.find(c => c.toNode === id && c.toPort === 'velocity');
+
+        let triggerValue = 0;
+        let velocity = 100;
+
+        if (triggerConn) {
+          const sourceNode = this.nodes[triggerConn.fromNode];
+          if (sourceNode && sourceNode.outputValue !== undefined) {
+            triggerValue = sourceNode.outputValue;
+          }
+        }
+
+        if (velocityConn) {
+          const sourceNode = this.nodes[velocityConn.fromNode];
+          if (sourceNode && sourceNode.outputValue !== undefined) {
+            velocity = Math.round(sourceNode.outputValue * 127);
+          }
+        }
+
+        const prevTrigger = node._prevTrigger || 0;
+        node._prevTrigger = triggerValue;
+
+        // Rising edge detection
+        if (triggerValue > 0.5 && prevTrigger <= 0.5) {
+          const clampedVelocity = Math.max(1, Math.min(127, velocity));
+          this.sendMIDINote(node.params.note, clampedVelocity, node.params.channel, node.params.duration);
+        }
+      } else if (node.type === 'bandsViz') {
+        // Bands Viz - output individual band values
+        node.bandValues = {
+          delta: (this.data.bands.delta || 0) / 100,
+          theta: (this.data.bands.theta || 0) / 100,
+          alpha: (this.data.bands.alpha || 0) / 100,
+          beta: (this.data.bands.beta || 0) / 100,
+          gamma: (this.data.bands.gamma || 0) / 100
+        };
+        // Output dominant band value
+        const maxBand = Object.entries(node.bandValues)
+          .reduce((max, [k, v]) => v > max[1] ? [k, v] : max, ['alpha', 0]);
+        node.outputValue = maxBand[1];
+        node.dominantBand = maxBand[0];
+      } else if (node.type === 'fftViz' || node.type === 'timeSeriesViz') {
+        // Initialize viz data buffer if needed
+        if (!this.vizData[id]) {
+          this.vizData[id] = {
+            buffer: [],
+            maxPoints: node.type === 'fftViz' ? 64 : 200
+          };
+        }
+        // Output the latest sample value (for potential chaining)
+        const channel = node.params.channel || 1;
+        node.outputValue = (this.data.bands.alpha || 0) / 100;  // Simplified output
       }
     }
 

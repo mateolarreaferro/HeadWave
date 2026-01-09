@@ -80,27 +80,139 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg-secondary);
+      background: #fafafa;
       color: var(--text-primary);
       height: 100vh;
-      display: flex;
+      width: 100vw;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       overflow: hidden;
+      position: relative;
     }
 
-    /* Sidebar */
+    /* Full-screen Patcher Background */
+    .patcher-fullscreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 0;
+      background: #fafafa;
+    }
+
+    .patcher-fullscreen .patcher-area {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      background: #fafafa;
+    }
+
+    /* Left Sidebar - Floating Panel (Clean White) */
     .sidebar {
-      width: 280px;
-      background: var(--bg-primary);
-      border-right: 1px solid var(--border-light);
-      padding: var(--space-lg) var(--space-md);
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      width: 220px;
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: var(--space-lg);
-      overflow-y: auto;
-      height: 100vh;
+      gap: 0;
+      z-index: 100;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    /* Right Sidebar - Floating Panel (Clean White) */
+    .sidebar-right {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      width: 260px;
+      height: 320px;
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    /* Minimal Panel Styles */
+    .panel-section {
+      padding: 12px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .panel-section:last-child {
+      border-bottom: none;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .panel-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+    }
+    .input-minimal {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 13px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background: #fafafa;
+      margin-bottom: 8px;
+    }
+    .input-minimal:focus {
+      outline: none;
+      border-color: #2563eb;
+      background: #fff;
+    }
+    .btn-row {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-minimal {
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-minimal:hover {
+      background: #f5f5f5;
+      border-color: #ccc;
+    }
+    .btn-minimal.btn-primary {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #fff;
+    }
+    .btn-minimal.btn-primary:hover {
+      background: #1d4ed8;
+    }
+    .status-dot-small {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ccc;
+      overflow: hidden;
+      text-indent: -9999px;
+      flex-shrink: 0;
+    }
+    .status-dot-small.active {
+      background: #22c55e;
     }
 
     .brand {
@@ -806,598 +918,155 @@
   </style>
 </head>
 <body>
+  <!-- Full-screen Patcher Background -->
+  <div class="patcher-fullscreen">
+    <div class="patcher-area">
+      <div id="patcher-container" style="width: 100%; height: 100%;"></div>
+    </div>
+  </div>
+
+  <!-- Floating Left Panel -->
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-header">
-        <div class="brand-logo">H</div>
-        <div class="brand-text">
-          <h1>HeadWave</h1>
-          <div class="tagline">Biosignal Creative Platform</div>
-        </div>
-      </div>
-      <div class="brand-credit">EEG · CV · OSC</div>
+    <div style="margin-bottom: 8px;">
+      <div style="font-size: 15px; font-weight: 600; color: #333;">HeadWave</div>
+      <div style="font-size: 11px; color: #999;">EEG · CV · OSC</div>
     </div>
 
-    <div class="section">
-      <div class="section-label">Quick Start</div>
+    <!-- Global Messages -->
+    <div id="global-error" class="alert alert-error"></div>
+    <div id="global-success" class="alert alert-success"></div>
 
-      <!-- Global Messages -->
-      <div id="global-error" class="alert alert-error"></div>
-      <div id="global-success" class="alert alert-success"></div>
-
-      <!-- Simulator Mode --><div class="card" style="background: var(--bg-tertiary);">
-        <div class="card-title" style="margin-bottom: var(--space-md);">🧪 Debug Mode</div>
-        <div class="toggle-group" style="margin-bottom: var(--space-sm);">
-          <button id="toggle-simulator" class="toggle-btn">Use Simulator</button>
-        </div>
-        <div id="simulator-controls" style="display:none; margin-top: var(--space-md);">
-          <label class="field-label">Brain State</label>
-          <select id="simulator-mode" style="width: 100%; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--border-light); background: var(--bg-primary); font-family: inherit; font-size: 13px;">
-            <option value="normal">Normal</option>
-            <option value="meditation">Meditation (High Alpha/Theta)</option>
-            <option value="focused">Focused (High Beta)</option>
-            <option value="drowsy">Drowsy (High Delta)</option>
-          </select>
-        </div>
-        <div class="helper-text" style="margin-top: var(--space-sm);">
-          Test without EEG hardware using synthetic data
-        </div>
+    <!-- EEG Connection -->
+    <div class="panel-section">
+      <div class="panel-header">
+        <span class="panel-title">EEG</span>
+        <div class="status-indicator" id="status-dot"></div>
       </div>
-
-      <!-- Connection & Streaming (Compact) -->
-      <!-- Connection -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title-group" style="flex: 1;">
-            <div class="card-title">Connection</div>
-            <div class="card-subtitle" id="status-subtext">Ready to connect</div>
-          </div>
-          <div class="status-indicator" id="status-dot"></div>
-        </div>
-
-        <div class="field-group">
-          <input
-            id="serial-input"
-            type="text"
-            placeholder="Serial port (optional for Bluetooth)"
-          />
-        </div>
-
-        <div class="btn-group">
-          <button id="btn-connect" class="btn btn-primary" style="flex: 1;">
-            Connect
-          </button>
-          <button id="btn-disconnect" class="btn btn-danger">
-            Disconnect
-          </button>
-        </div>
+      <input id="serial-input" type="text" placeholder="Serial port (optional)" class="input-minimal" />
+      <div class="btn-row">
+        <button id="btn-connect" class="btn-minimal btn-primary">Connect</button>
+        <button id="btn-disconnect" class="btn-minimal">Disconnect</button>
       </div>
-
-      <!-- Streaming -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Streaming</div>
-          <span id="stream-pill" class="status-pill">Ready</span>
-        </div>
-
-        <div class="field-group" style="margin-bottom: 0;">
-          <label class="field-label">EEG Data</label>
-          <div class="btn-group">
-            <button id="btn-start" class="btn btn-primary" style="flex: 1;">
-              Start
-            </button>
-            <button id="btn-stop" class="btn btn-secondary">
-              Stop
-            </button>
-          </div>
-        </div>
+      <div class="btn-row" style="margin-top: 8px;">
+        <button id="btn-start" class="btn-minimal btn-primary" style="flex: 1;">Start Stream</button>
+        <button id="btn-stop" class="btn-minimal">Stop</button>
       </div>
+      <span id="stream-pill" class="status-pill" style="display: none;">Ready</span>
+      <span id="status-subtext" style="display: none;"></span>
+    </div>
 
-      <!-- Camera -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Camera</div>
-          <span id="camera-pill" class="status-pill">Ready</span>
-        </div>
-
-        <div class="field-group" style="margin-bottom: 0;">
-          <div class="btn-group">
-            <button id="btn-camera-start" class="btn btn-primary" style="flex: 1;">
-              Start
-            </button>
-            <button id="btn-camera-stop" class="btn btn-secondary">
-              Stop
-            </button>
-          </div>
-        </div>
+    <!-- Simulator -->
+    <div class="panel-section">
+      <div class="panel-header">
+        <span class="panel-title">Simulator</span>
       </div>
+      <button id="toggle-simulator" class="btn-minimal" style="width: 100%;">Enable</button>
+      <select id="simulator-mode" class="input-minimal" style="display:none; margin-top: 8px;">
+        <option value="normal">Normal</option>
+        <option value="meditation">Meditation</option>
+        <option value="focused">Focused</option>
+        <option value="drowsy">Drowsy</option>
+      </select>
+      <div id="simulator-controls" style="display:none;"></div>
+    </div>
 
+    <!-- Camera -->
+    <div class="panel-section" style="border-bottom: none;">
+      <div class="panel-header">
+        <span class="panel-title">Camera</span>
+        <span id="camera-pill" class="status-dot-small"></span>
+      </div>
+      <div class="btn-row">
+        <button id="btn-camera-start" class="btn-minimal btn-primary" style="flex: 1;">Start</button>
+        <button id="btn-camera-stop" class="btn-minimal">Stop</button>
+      </div>
     </div>
 
   </aside>
 
-  <main class="main">
-    <header class="main-header">
-      <div class="main-title-group">
-        <h2>Signal Monitor</h2>
-        <p class="main-subtitle">
-          Real-time biosignal visualization with EEG analysis and facial feature tracking for creative control.
-        </p>
+  <!-- Hidden elements for JavaScript compatibility -->
+  <div style="display: none !important;">
+    <button id="tab-audio"></button>
+    <button id="tab-timeseries"></button>
+    <button id="tab-fft"></button>
+    <button id="tab-bands"></button>
+    <button id="tab-camera"></button>
+    <button id="tab-sketch"></button>
+    <div id="visual-title"></div>
+    <div id="visual-subtitle"></div>
+    <div id="visual-meta"></div>
+    <canvas id="timeseriesChart"></canvas>
+    <canvas id="fftChart"></canvas>
+    <canvas id="bandsChart"></canvas>
+    <div id="cameraView"><img id="cameraFeed" /></div>
+    <div id="sketchView"><div id="p5-container"></div></div>
+    <div id="audioView">
+      <div id="visual-preview-wrapper">
+        <div id="visual-preview-container"></div>
       </div>
-      <div class="mode-tabs">
-        <button id="tab-timeseries" class="mode-tab active">Time Series</button>
-        <button id="tab-fft" class="mode-tab">FFT</button>
-        <button id="tab-bands" class="mode-tab">Bands</button>
-        <button id="tab-camera" class="mode-tab">Camera</button>
-        <button id="tab-sketch" class="mode-tab">Sketch</button>
-        <button id="tab-audio" class="mode-tab">Audio</button>
+    </div>
+    <div id="cameraFeatures">
+      <div id="cv-features-toggle"></div>
+      <div id="cv-features-arrow"></div>
+      <div id="cv-features-content"></div>
+      <span id="val-mouth">0</span>
+      <span id="val-smile">0</span>
+      <span id="val-roll">0</span>
+      <span id="val-gaze-x">0</span>
+      <span id="val-gaze-y">0</span>
+      <span id="left-hand-status"></span>
+      <span id="left-hand-gesture"></span>
+      <span id="val-left-pinch">0</span>
+      <span id="right-hand-status"></span>
+      <span id="right-hand-gesture"></span>
+      <span id="val-right-pinch">0</span>
+      <div id="meter-mouth"></div>
+      <div id="meter-smile"></div>
+      <div id="meter-roll"></div>
+      <div id="meter-gaze-x"></div>
+      <div id="meter-gaze-y"></div>
+      <div id="meter-left-pinch"></div>
+      <div id="meter-right-pinch"></div>
+    </div>
+    <span id="chip-mode"></span>
+    <span id="chip-osc"></span>
+    <input type="checkbox" id="auto-scale-toggle">
+    <input type="range" id="scale-slider">
+    <span id="scale-value"></span>
+    <div id="error-msg"></div>
+    <div id="viz-controls">
+      <button id="viz-toggle"></button>
+      <div id="viz-controls-content"></div>
+      <select id="viz-mode"></select>
+      <input id="viz-count"><span id="viz-count-val"></span>
+      <input id="viz-size"><span id="viz-size-val"></span>
+      <input id="viz-speed"><span id="viz-speed-val"></span>
+      <input id="viz-trails"><span id="viz-trails-val"></span>
+      <select id="map-movement-source"></select>
+      <select id="map-movement-param"></select>
+      <select id="map-hue-source"></select>
+      <select id="map-hue-param"></select>
+      <select id="map-size-source"></select>
+      <select id="map-size-param"></select>
+      <select id="map-brightness-source"></select>
+      <select id="map-brightness-param"></select>
+      <select id="viz-colorscheme"></select>
+    </div>
+  </div>
+
+  <!-- Right Sidebar: AI Assistant -->
+  <aside class="sidebar-right">
+    <div style="margin-bottom: 12px;">
+      <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #666;">AI Assistant</div>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+      <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: 12px; padding: 12px; background: #fafafa; border-radius: 8px; border: 1px solid #eee; display: flex; flex-direction: column; gap: 8px;"></div>
+      <div style="display: flex; gap: 6px;">
+        <input id="chatInput" type="text" placeholder="Create a patch..." class="input-minimal" style="margin-bottom: 0;" />
+        <button id="chatSend" class="btn-minimal btn-primary">Send</button>
       </div>
-    </header>
-
-    <section class="main-grid">
-      <div class="chart-card">
-        <div class="chart-header">
-          <div>
-            <div class="chart-title" id="visual-title">Time Series</div>
-            <div class="chart-description" id="visual-subtitle">
-              4-channel windowed EEG traces with temporal dynamics
-            </div>
-          </div>
-          <div class="chart-meta" id="visual-meta">
-            Mode: timeseries · Window: 4s
-          </div>
-        </div>
-
-        <div class="chart-container">
-          <canvas id="timeseriesChart"></canvas>
-          <canvas id="fftChart" style="display:none;"></canvas>
-          <canvas id="bandsChart" style="display:none;"></canvas>
-          <div id="cameraView" style="display:none; width: 100%; flex: 1; position: relative; min-height: 0; max-height: 100%; overflow: hidden;">
-            <img id="cameraFeed" style="width: 100%; height: 100%; object-fit: cover; object-position: center; border-radius: 8px;" />
-          </div>
-
-          <div id="sketchView" style="display:none; width: 100%; height: 100%; position: relative;">
-            <div id="p5-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div>
-
-            <!-- Enhanced Visualization Controls -->
-            <div id="viz-controls" style="position: absolute; top: 10px; right: 10px; background: rgba(20, 20, 30, 0.95); padding: 15px; border-radius: 8px; color: white; font-family: -apple-system, sans-serif; font-size: 12px; width: 280px; max-height: calc(100% - 20px); overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3); backdrop-filter: blur(10px); z-index: 100;">
-              
-              <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
-                <span>Visualization Controls</span>
-                <button id="viz-toggle" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; padding: 0;">▼</button>
-              </div>
-              
-              <div id="viz-controls-content">
-                <!-- Visualization Mode -->
-                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                  <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #aaa;">Mode</label>
-                  <select id="viz-mode" style="width: 100%; padding: 6px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 12px;">
-                    <option value="particles">Particles</option>
-                    <option value="waves">Waves</option>
-                    <option value="radial">Radial Burst</option>
-                    <option value="flow">Flow Field</option>
-                    <option value="mandala">Mandala</option>
-                  </select>
-                </div>
-
-                <!-- Visual Parameters -->
-                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                  <label style="display: block; margin-bottom: 10px; font-weight: 500; color: #aaa;">Parameters</label>
-                  
-                  <div style="margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-                      <span style="color: #ccc; font-size: 11px;">Count</span>
-                      <span id="viz-count-val" style="color: #4af; font-size: 11px;">100</span>
-                    </div>
-                    <input type="range" id="viz-count" min="20" max="300" value="100" style="width: 100%;">
-                  </div>
-
-                  <div style="margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-                      <span style="color: #ccc; font-size: 11px;">Size</span>
-                      <span id="viz-size-val" style="color: #4af; font-size: 11px;">10</span>
-                    </div>
-                    <input type="range" id="viz-size" min="2" max="30" value="10" style="width: 100%;">
-                  </div>
-
-                  <div style="margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-                      <span style="color: #ccc; font-size: 11px;">Speed</span>
-                      <span id="viz-speed-val" style="color: #4af; font-size: 11px;">1.0</span>
-                    </div>
-                    <input type="range" id="viz-speed" min="0.1" max="5" step="0.1" value="1.0" style="width: 100%;">
-                  </div>
-
-                  <div style="margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-                      <span style="color: #ccc; font-size: 11px;">Trails</span>
-                      <span id="viz-trails-val" style="color: #4af; font-size: 11px;">50</span>
-                    </div>
-                    <input type="range" id="viz-trails" min="0" max="100" value="50" style="width: 100%;">
-                  </div>
-                </div>
-
-                <!-- Data Mapping -->
-                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                  <label style="display: block; margin-bottom: 10px; font-weight: 500; color: #aaa;">Data Mapping</label>
-                  
-                  <!-- Movement Speed -->
-                  <div style="margin-bottom: 8px;">
-                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Movement Speed</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                      <select id="map-movement-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="bands" selected>Bands</option>
-                        <option value="fft">FFT</option>
-                        <option value="timeseries">Time</option>
-                        <option value="camera">Camera</option>
-                      </select>
-                      <select id="map-movement-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="delta">Delta</option>
-                        <option value="theta" selected>Theta</option>
-                        <option value="alpha">Alpha</option>
-                        <option value="beta">Beta</option>
-                        <option value="gamma">Gamma</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <!-- Color Hue -->
-                  <div style="margin-bottom: 8px;">
-                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Color Hue</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                      <select id="map-hue-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="bands" selected>Bands</option>
-                        <option value="fft">FFT</option>
-                        <option value="timeseries">Time</option>
-                        <option value="camera">Camera</option>
-                      </select>
-                      <select id="map-hue-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="delta">Delta</option>
-                        <option value="theta">Theta</option>
-                        <option value="alpha">Alpha</option>
-                        <option value="beta" selected>Beta</option>
-                        <option value="gamma">Gamma</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <!-- Element Size -->
-                  <div style="margin-bottom: 8px;">
-                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Element Size</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                      <select id="map-size-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="bands" selected>Bands</option>
-                        <option value="fft">FFT</option>
-                        <option value="timeseries">Time</option>
-                        <option value="camera">Camera</option>
-                      </select>
-                      <select id="map-size-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="delta">Delta</option>
-                        <option value="theta">Theta</option>
-                        <option value="alpha" selected>Alpha</option>
-                        <option value="beta">Beta</option>
-                        <option value="gamma">Gamma</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <!-- Brightness -->
-                  <div style="margin-bottom: 6px;">
-                    <label style="display: block; color: #ccc; margin-bottom: 2px; font-size: 10px;">Brightness</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                      <select id="map-brightness-source" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="bands" selected>Bands</option>
-                        <option value="fft">FFT</option>
-                        <option value="timeseries">Time</option>
-                        <option value="camera">Camera</option>
-                      </select>
-                      <select id="map-brightness-param" style="padding: 4px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 10px;">
-                        <option value="delta">Delta</option>
-                        <option value="theta">Theta</option>
-                        <option value="alpha">Alpha</option>
-                        <option value="beta">Beta</option>
-                        <option value="gamma" selected>Gamma</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Color Scheme -->
-                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                  <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #aaa;">Color Palette</label>
-                  <select id="viz-colorscheme" style="width: 100%; padding: 6px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; font-size: 12px;">
-                    <option value="cool">Cool (Blue-Purple)</option>
-                    <option value="warm">Warm (Red-Orange)</option>
-                    <option value="earth">Earth (Green-Brown)</option>
-                    <option value="rainbow">Rainbow</option>
-                    <option value="monochrome">Monochrome</option>
-                  </select>
-                </div>
-
-                <!-- Presets -->
-                <div>
-                  <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #aaa;">Quick Presets</label>
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                    <button class="viz-preset" data-preset="meditation" style="padding: 8px; background: rgba(100,150,255,0.2); border: 1px solid rgba(100,150,255,0.4); border-radius: 4px; color: #aaf; cursor: pointer; font-size: 11px; transition: all 0.2s;">Calm</button>
-                    <button class="viz-preset" data-preset="focused" style="padding: 8px; background: rgba(255,100,150,0.2); border: 1px solid rgba(255,100,150,0.4); border-radius: 4px; color: #faa; cursor: pointer; font-size: 11px; transition: all 0.2s;">Energy</button>
-                    <button class="viz-preset" data-preset="psychedelic" style="padding: 8px; background: rgba(200,100,255,0.2); border: 1px solid rgba(200,100,255,0.4); border-radius: 4px; color: #caf; cursor: pointer; font-size: 11px; transition: all 0.2s;">Trip</button>
-                    <button class="viz-preset" data-preset="minimal" style="padding: 8px; background: rgba(150,150,150,0.2); border: 1px solid rgba(150,150,150,0.4); border-radius: 4px; color: #ccc; cursor: pointer; font-size: 11px; transition: all 0.2s;">Minimal</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Audio Patcher View -->
-          <div id="audioView" style="display:none; width: 100%; height: 100%; position: relative; background: #1a1a2e;">
-            <div id="patcher-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div>
-
-            <!-- Hidden container for VisualRenderer (used for fullscreen mode) -->
-            <div id="visual-preview-wrapper" style="display: none;">
-              <div id="visual-preview-container" style="width: 1px; height: 1px;"></div>
-            </div>
-
-            <!-- Audio Controls Overlay -->
-            <div id="audio-controls" style="position: absolute; top: 10px; left: 10px; background: rgba(20, 20, 30, 0.95); padding: 12px; border-radius: 8px; color: white; font-family: -apple-system, sans-serif; font-size: 12px; z-index: 100;">
-              <div style="font-size: 14px; font-weight: 600; margin-bottom: 10px;">Audio Engine</div>
-
-              <div style="margin-bottom: 10px;">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                  <input type="checkbox" id="audio-enabled" style="width: 16px; height: 16px;">
-                  <span>Enable Audio</span>
-                </label>
-              </div>
-
-              <div style="margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                  <span>Master Volume</span>
-                  <span id="master-vol-val">50%</span>
-                </div>
-                <input type="range" id="master-volume" min="0" max="100" value="50" style="width: 100%;">
-              </div>
-
-              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button id="audio-add-osc" class="btn btn-secondary btn-sm">+ Oscillator</button>
-                <button id="audio-add-noise" class="btn btn-secondary btn-sm">+ Noise</button>
-                <button id="audio-add-filter" class="btn btn-secondary btn-sm">+ Filter</button>
-              </div>
-
-              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
-                <div style="font-size: 11px; color: #888;">
-                  Right-click canvas to add nodes. Drag between ports to connect.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="cameraFeatures" style="display:none; margin-top: var(--space-sm); border-top: 1px solid var(--border-light); flex-shrink: 0;">
-          <!-- Toggle Header -->
-          <div id="cv-features-toggle" class="section-header" style="cursor: pointer; padding: var(--space-xs) 0; display: flex; justify-content: space-between; align-items: center;">
-            <span class="field-label" style="color: var(--text-secondary);">CV Features</span>
-            <span id="cv-features-arrow" style="color: var(--text-secondary); font-size: 12px;">▼</span>
-          </div>
-          <div id="cv-features-content" style="padding-top: var(--space-xs);">
-            <!-- Face Features -->
-            <div class="field-label" style="margin-bottom: 4px; color: var(--text-muted); font-size: 10px;">FACE</div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-sm); margin-bottom: var(--space-sm);">
-              <div class="feature-meter">
-                <div class="field-label">Mouth</div>
-                <div class="progress-bar"><div id="meter-mouth" class="progress-fill"></div></div>
-                <div class="feature-value"><span id="val-mouth">0.00</span></div>
-              </div>
-              <div class="feature-meter">
-                <div class="field-label">Smile</div>
-                <div class="progress-bar"><div id="meter-smile" class="progress-fill"></div></div>
-                <div class="feature-value"><span id="val-smile">0.00</span></div>
-              </div>
-              <div class="feature-meter">
-                <div class="field-label">Roll</div>
-                <div class="progress-bar"><div id="meter-roll" class="progress-fill"></div></div>
-                <div class="feature-value"><span id="val-roll">0.00</span></div>
-              </div>
-            </div>
-
-            <!-- Eye Gaze -->
-            <div class="field-label" style="margin-bottom: 4px; color: var(--text-muted); font-size: 10px;">EYE GAZE</div>
-            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-sm); margin-bottom: var(--space-sm);">
-              <div class="feature-meter">
-                <div class="field-label">Gaze X</div>
-                <div class="progress-bar"><div id="meter-gaze-x" class="progress-fill" style="background: var(--accent-purple);"></div></div>
-                <div class="feature-value"><span id="val-gaze-x">0.00</span></div>
-              </div>
-              <div class="feature-meter">
-                <div class="field-label">Gaze Y</div>
-                <div class="progress-bar"><div id="meter-gaze-y" class="progress-fill" style="background: var(--accent-purple);"></div></div>
-                <div class="feature-value"><span id="val-gaze-y">0.00</span></div>
-              </div>
-            </div>
-
-            <!-- Hands -->
-            <div class="field-label" style="margin-bottom: 4px; color: var(--text-muted); font-size: 10px;">HANDS</div>
-            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-sm);">
-              <div class="feature-meter">
-                <div class="field-label">Left Hand</div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span id="left-hand-status" class="badge" style="font-size: 10px;">Not detected</span>
-                  <span id="left-hand-gesture" style="font-size: 11px; color: var(--text-secondary);">--</span>
-                </div>
-                <div class="progress-bar" style="margin-top: 4px;"><div id="meter-left-pinch" class="progress-fill" style="background: var(--accent-green);"></div></div>
-                <div class="feature-value">Pinch: <span id="val-left-pinch">0.00</span></div>
-              </div>
-              <div class="feature-meter">
-                <div class="field-label">Right Hand</div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span id="right-hand-status" class="badge" style="font-size: 10px;">Not detected</span>
-                  <span id="right-hand-gesture" style="font-size: 11px; color: var(--text-secondary);">--</span>
-                </div>
-                <div class="progress-bar" style="margin-top: 4px;"><div id="meter-right-pinch" class="progress-fill" style="background: var(--accent-green);"></div></div>
-                <div class="feature-value">Pinch: <span id="val-right-pinch">0.00</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="chart-footer">
-          <div class="badge">
-            <span class="badge-dot"></span>
-            <span id="chip-mode">Streaming: time series</span>
-          </div>
-          <div class="badge">
-            OSC: <span id="chip-osc">disabled</span>
-          </div>
-          <div id="scale-controls" style="margin-left: auto; display: flex; align-items: center; gap: 16px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label style="font-size: 12px; color: var(--text-secondary); font-weight: 500;">Auto</label>
-              <label class="toggle-switch">
-                <input type="checkbox" id="auto-scale-toggle">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label style="font-size: 12px; color: var(--text-secondary); font-weight: 500;">Y-Scale:</label>
-              <input type="range" id="scale-slider" min="25" max="10000" value="100" step="25" class="custom-slider" style="width: 120px; cursor: pointer;">
-              <span id="scale-value" style="font-size: 12px; color: var(--text-primary); font-weight: 500; min-width: 60px;">±100</span>
-            </div>
-          </div>
-        </div>
-
-        <div id="error-msg" class="alert alert-error"></div>
-      </div>
-
-      <div class="section">
-        <div class="section-label" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="osc-section-header">
-          <span>OSC Output</span>
-          <span id="osc-toggle-icon" style="font-size: 14px;">▼</span>
-        </div>
-        <div class="card" id="osc-section-content">
-          <div class="field-group">
-            <label class="field-label">Target Address</label>
-            <div class="input-row">
-              <input id="osc-ip" type="text" value="127.0.0.1" placeholder="IP Address" />
-              <input id="osc-port" type="number" value="9000" placeholder="Port" style="max-width: 100px;" />
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">EEG Data Format</label>
-            <div class="toggle-group">
-              <button id="osc-raw-toggle" class="toggle-btn active">Timeseries</button>
-              <button id="osc-bands-toggle" class="toggle-btn">Bands</button>
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">Camera CV</label>
-            <div class="toggle-group">
-              <button id="osc-camera-toggle" class="toggle-btn active">FaceSynth</button>
-            </div>
-            <div class="helper-text" style="margin-top: 8px;">
-              Sends facial features to /faceSynth/* and /cv/face/*
-            </div>
-          </div>
-
-          <div class="divider"></div>
-
-          <div class="helper-text">
-            Stream biosignals via OSC to creative applications (Max/MSP, TouchDesigner, Pure Data, Ableton, etc.)
-          </div>
-
-          <div style="margin-top: var(--space-md);">
-            <button id="osc-enable-btn" class="btn btn-secondary">
-              Enable OSC
-            </button>
-          </div>
-        </div>
-
-        <!-- MIDI Output -->
-        <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="midi-section-header">
-          <span>MIDI Output</span>
-          <span id="midi-toggle-icon" style="font-size: 14px;">▶</span>
-        </div>
-        <div class="card" id="midi-section-content" style="display: none;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
-            <span class="field-label" style="margin: 0;">Status</span>
-            <span id="midi-pill" class="status-pill">Disconnected</span>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">Port</label>
-            <select id="midi-port" style="width: 100%; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--border-light); background: var(--bg-primary); font-family: inherit; font-size: 13px;">
-              <option value="">Auto-detect IAC</option>
-            </select>
-          </div>
-
-          <div class="btn-group">
-            <button id="btn-midi-connect" class="btn btn-primary" style="flex: 1;">
-              Connect
-            </button>
-            <button id="btn-midi-disconnect" class="btn btn-secondary">
-              Disconnect
-            </button>
-          </div>
-
-          <div class="helper-text" style="margin-top: var(--space-sm);">
-            Enable IAC Driver in Audio MIDI Setup. EEG bands → CC 20-24, CV → CC 30-37.
-          </div>
-        </div>
-
-        <!-- Recording -->
-        <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="recording-section-header">
-          <span>Recording</span>
-          <span id="recording-toggle-icon" style="font-size: 14px;">▶</span>
-        </div>
-        <div class="card" id="recording-section-content" style="display: none;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
-            <span class="field-label" style="margin: 0;">Status</span>
-            <span id="recording-pill" class="status-pill">Ready</span>
-          </div>
-
-          <div class="btn-group">
-            <button id="btn-record-start" class="btn btn-primary" style="flex: 1;">
-              Record
-            </button>
-            <button id="btn-record-stop" class="btn btn-secondary">
-              Stop
-            </button>
-          </div>
-
-          <div id="recording-duration" class="helper-text" style="margin-top: var(--space-sm); display: none;">
-            Duration: <span id="rec-duration">00:00</span>
-          </div>
-
-          <div id="recording-download" style="display: none; margin-top: var(--space-sm);">
-            <div class="helper-text" style="margin-bottom: var(--space-xs);">Download recording:</div>
-            <div class="btn-group">
-              <button id="btn-download-json" class="btn btn-secondary" style="flex: 1; font-size: 11px;">
-                JSON
-              </button>
-              <button id="btn-download-csv" class="btn btn-secondary" style="flex: 1; font-size: 11px;">
-                CSV
-              </button>
-            </div>
-          </div>
-
-          <div class="helper-text" style="margin-top: var(--space-sm);">
-            Record EEG and CV data. Export as JSON or CSV.
-          </div>
-        </div>
-
-        <!-- AI Assistant Chat -->
-        <div class="section-label" style="margin-top: var(--space-lg); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" id="ai-section-header">
-          <span>AI Assistant</span>
-          <span id="ai-toggle-icon" style="font-size: 14px;">▶</span>
-        </div>
-        <div class="card" id="ai-section-content" style="display: none; flex-direction: column; height: 280px;">
-          <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: var(--space-sm); padding: var(--space-sm); background: var(--bg-primary); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: var(--space-sm);"></div>
-          <div style="display: flex; gap: var(--space-sm);">
-            <input id="chatInput" type="text" placeholder="Ask about EEG, OSC, or visualization..." style="flex: 1; font-size: 12px; padding: 8px;" />
-            <button id="chatSend" class="btn btn-primary" style="padding: 8px 12px; font-size: 12px;">Send</button>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
+    </div>
+  </aside>
 
   <script>
     // Stream configuration constants - optimized for real-time EEG visualization
@@ -1406,7 +1075,7 @@
 
     let ws = null;
     let cameraWs = null;
-    let currentMode = "timeseries";
+    let currentMode = "audio";
     let connected = false;
     let streaming = false;
     let cameraRunning = false;
@@ -1466,10 +1135,8 @@
         streamPill.classList.remove("active");
       }
       if (cameraRunning) {
-        cameraPill.textContent = "Streaming";
         cameraPill.classList.add("active");
       } else {
-        cameraPill.textContent = "Ready";
         cameraPill.classList.remove("active");
       }
       chipMode.textContent = streaming
@@ -1608,32 +1275,34 @@
       setStatus();
     };
 
-    // OSC toggles
+    // OSC toggles (elements removed in patcher-focused UI)
     const oscRawToggle = document.getElementById("osc-raw-toggle");
     const oscBandsToggle = document.getElementById("osc-bands-toggle");
     const oscEnableBtn = document.getElementById("osc-enable-btn");
 
-    oscRawToggle.onclick = () => {
+    if (oscRawToggle) oscRawToggle.onclick = () => {
       oscSendRaw = !oscSendRaw;
       oscRawToggle.classList.toggle("active", oscSendRaw);
       pushOscConfig();
     };
 
-    oscBandsToggle.onclick = () => {
+    if (oscBandsToggle) oscBandsToggle.onclick = () => {
       oscSendBands = !oscSendBands;
       oscBandsToggle.classList.toggle("active", oscSendBands);
       pushOscConfig();
     };
 
-    oscEnableBtn.onclick = () => {
+    if (oscEnableBtn) oscEnableBtn.onclick = () => {
       oscEnabled = !oscEnabled;
       oscEnableBtn.textContent = oscEnabled ? "Disable OSC" : "Enable OSC";
       pushOscConfig();
     };
 
     async function pushOscConfig() {
-      const ip = document.getElementById("osc-ip").value.trim() || "127.0.0.1";
-      const port = parseInt(document.getElementById("osc-port").value.trim() || "9000", 10);
+      const ipEl = document.getElementById("osc-ip");
+      const portEl = document.getElementById("osc-port");
+      const ip = ipEl ? ipEl.value.trim() || "127.0.0.1" : "127.0.0.1";
+      const port = portEl ? parseInt(portEl.value.trim() || "9000", 10) : 9000;
       await postJSON("/api/osc_config", {
         ip,
         port,
@@ -1644,19 +1313,19 @@
       setOscChip();
     }
 
-    // Mode tabs
+    // Mode tabs (hidden in patcher-focused UI)
     const tabTS = document.getElementById("tab-timeseries");
     const tabFFT = document.getElementById("tab-fft");
     const tabBands = document.getElementById("tab-bands");
     const tabCamera = document.getElementById("tab-camera");
     const tabSketch = document.getElementById("tab-sketch");
     const tabAudio = document.getElementById("tab-audio");
-    tabTS.onclick = () => switchMode("timeseries");
-    tabFFT.onclick = () => switchMode("fft");
-    tabBands.onclick = () => switchMode("bands");
-    tabCamera.onclick = () => switchMode("camera");
-    tabSketch.onclick = () => switchMode("sketch");
-    tabAudio.onclick = () => switchMode("audio");
+    if (tabTS) tabTS.onclick = () => switchMode("timeseries");
+    if (tabFFT) tabFFT.onclick = () => switchMode("fft");
+    if (tabBands) tabBands.onclick = () => switchMode("bands");
+    if (tabCamera) tabCamera.onclick = () => switchMode("camera");
+    if (tabSketch) tabSketch.onclick = () => switchMode("sketch");
+    if (tabAudio) tabAudio.onclick = () => switchMode("audio");
 
     function switchMode(mode) {
       if (mode === currentMode) return;
@@ -2313,11 +1982,12 @@
     toggleSimBtn.onclick = async () => {
       useSimulator = !useSimulator;
       toggleSimBtn.classList.toggle('active', useSimulator);
-      simControls.style.display = useSimulator ? 'block' : 'none';
-      
+      toggleSimBtn.textContent = useSimulator ? 'Disable' : 'Enable';
+      simMode.style.display = useSimulator ? 'block' : 'none';
+
       // Update backend
       await postJSON('/api/use_simulator', { enabled: useSimulator });
-      
+
       // Update UI message
       const mode = useSimulator ? 'Simulator' : 'Real Hardware';
       showSuccess(`Switched to ${mode} mode`);
@@ -2573,6 +2243,7 @@
 
     // Load MIDI ports on page load
     async function loadMidiPorts() {
+      if (!midiPortSelect) return;
       try {
         const res = await fetch('/api/midi/ports');
         const data = await res.json();
@@ -2594,30 +2265,38 @@
     }
     loadMidiPorts();
 
-    btnMidiConnect.onclick = async () => {
-      const portName = midiPortSelect.value || null;
-      try {
-        const res = await postJSON('/api/midi/connect', { port_name: portName });
-        if (res.status === 'ok') {
-          midiConnected = true;
-          midiPill.textContent = 'Connected';
-          midiPill.classList.add('active');
-          showSuccess(`MIDI connected to ${res.port}`);
-        } else {
-          showError(res.message || 'Failed to connect MIDI');
+    if (btnMidiConnect) {
+      btnMidiConnect.onclick = async () => {
+        const portName = midiPortSelect ? midiPortSelect.value : null;
+        try {
+          const res = await postJSON('/api/midi/connect', { port_name: portName });
+          if (res.status === 'ok') {
+            midiConnected = true;
+            if (midiPill) {
+              midiPill.textContent = 'Connected';
+              midiPill.classList.add('active');
+            }
+            showSuccess(`MIDI connected to ${res.port}`);
+          } else {
+            showError(res.message || 'Failed to connect MIDI');
+          }
+        } catch (e) {
+          showError('MIDI connection failed: ' + e.message);
         }
-      } catch (e) {
-        showError('MIDI connection failed: ' + e.message);
-      }
-    };
+      };
+    }
 
-    btnMidiDisconnect.onclick = async () => {
-      await postJSON('/api/midi/disconnect', {});
-      midiConnected = false;
-      midiPill.textContent = 'Disconnected';
-      midiPill.classList.remove('active');
-      showSuccess('MIDI disconnected');
-    };
+    if (btnMidiDisconnect) {
+      btnMidiDisconnect.onclick = async () => {
+        await postJSON('/api/midi/disconnect', {});
+        midiConnected = false;
+        if (midiPill) {
+          midiPill.textContent = 'Disconnected';
+          midiPill.classList.remove('active');
+        }
+        showSuccess('MIDI disconnected');
+      };
+    }
 
     // -------- Recording Controls --------
     let recording = false;
@@ -2633,84 +2312,96 @@
     const btnDownloadJson = document.getElementById('btn-download-json');
     const btnDownloadCsv = document.getElementById('btn-download-csv');
 
-    btnRecordStart.onclick = async () => {
-      try {
-        const res = await postJSON('/api/recording/start', { metadata: { source: 'web' } });
-        if (res.status === 'ok') {
-          recording = true;
-          recordingStartTime = Date.now();
-          lastSessionId = res.session_id;
-          recordingPill.textContent = 'Recording';
-          recordingPill.classList.add('active');
-          recordingPill.style.background = 'var(--error)';
-          recordingPill.style.color = 'white';
-          recordingDuration.style.display = 'block';
-          recordingDownload.style.display = 'none';
+    if (btnRecordStart) {
+      btnRecordStart.onclick = async () => {
+        try {
+          const res = await postJSON('/api/recording/start', { metadata: { source: 'web' } });
+          if (res.status === 'ok') {
+            recording = true;
+            recordingStartTime = Date.now();
+            lastSessionId = res.session_id;
+            if (recordingPill) {
+              recordingPill.textContent = 'Recording';
+              recordingPill.classList.add('active');
+              recordingPill.style.background = 'var(--error)';
+              recordingPill.style.color = 'white';
+            }
+            if (recordingDuration) recordingDuration.style.display = 'block';
+            if (recordingDownload) recordingDownload.style.display = 'none';
 
-          // Update duration timer
-          recordingTimer = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-            const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-            const secs = (elapsed % 60).toString().padStart(2, '0');
-            recDurationSpan.textContent = `${mins}:${secs}`;
-          }, 1000);
+            // Update duration timer
+            recordingTimer = setInterval(() => {
+              const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+              const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+              const secs = (elapsed % 60).toString().padStart(2, '0');
+              if (recDurationSpan) recDurationSpan.textContent = `${mins}:${secs}`;
+            }, 1000);
 
-          showSuccess(`Recording started: ${res.session_id}`);
+            showSuccess(`Recording started: ${res.session_id}`);
+          }
+        } catch (e) {
+          showError('Failed to start recording: ' + e.message);
         }
-      } catch (e) {
-        showError('Failed to start recording: ' + e.message);
-      }
-    };
+      };
+    }
 
-    btnRecordStop.onclick = async () => {
-      try {
-        const res = await postJSON('/api/recording/stop', {});
-        recording = false;
-        clearInterval(recordingTimer);
-        recordingPill.textContent = 'Saved';
-        recordingPill.classList.remove('active');
-        recordingPill.style.background = '';
-        recordingPill.style.color = '';
-        recordingDuration.style.display = 'none';
+    if (btnRecordStop) {
+      btnRecordStop.onclick = async () => {
+        try {
+          const res = await postJSON('/api/recording/stop', {});
+          recording = false;
+          clearInterval(recordingTimer);
+          if (recordingPill) {
+            recordingPill.textContent = 'Saved';
+            recordingPill.classList.remove('active');
+            recordingPill.style.background = '';
+            recordingPill.style.color = '';
+          }
+          if (recordingDuration) recordingDuration.style.display = 'none';
 
-        // Show download buttons
-        recordingDownload.style.display = 'block';
+          // Show download buttons
+          if (recordingDownload) recordingDownload.style.display = 'block';
 
-        if (res.summary) {
-          showSuccess(`Recording saved: ${res.summary.eeg_samples || 0} EEG samples, ${res.summary.cv_samples || 0} CV samples`);
-        } else {
-          showSuccess('Recording saved');
+          if (res.summary) {
+            showSuccess(`Recording saved: ${res.summary.eeg_samples || 0} EEG samples, ${res.summary.cv_samples || 0} CV samples`);
+          } else {
+            showSuccess('Recording saved');
+          }
+
+          // Reset pill after delay
+          setTimeout(() => {
+            if (recordingPill) recordingPill.textContent = 'Ready';
+          }, 2000);
+        } catch (e) {
+          showError('Failed to stop recording: ' + e.message);
         }
-
-        // Reset pill after delay
-        setTimeout(() => {
-          recordingPill.textContent = 'Ready';
-        }, 2000);
-      } catch (e) {
-        showError('Failed to stop recording: ' + e.message);
-      }
-    };
+      };
+    }
 
     // Download handlers
-    btnDownloadJson.onclick = () => {
-      if (lastSessionId) {
-        window.open(`/api/recording/export/${lastSessionId}?format=json`, '_blank');
-      } else {
-        showError('No recording available');
-      }
-    };
+    if (btnDownloadJson) {
+      btnDownloadJson.onclick = () => {
+        if (lastSessionId) {
+          window.open(`/api/recording/export/${lastSessionId}?format=json`, '_blank');
+        } else {
+          showError('No recording available');
+        }
+      };
+    }
 
-    btnDownloadCsv.onclick = () => {
-      if (lastSessionId) {
-        window.open(`/api/recording/export/${lastSessionId}?format=csv`, '_blank');
-      } else {
-        showError('No recording available');
-      }
-    };
+    if (btnDownloadCsv) {
+      btnDownloadCsv.onclick = () => {
+        if (lastSessionId) {
+          window.open(`/api/recording/export/${lastSessionId}?format=csv`, '_blank');
+        } else {
+          showError('No recording available');
+        }
+      };
+    }
 
     // -------- Audio Patcher --------
     let patcherInitialized = false;
-    let audioEnabled = false;
+    let audioEnabled = true; // Auto-enabled
 
     function initAudioPatcher() {
       if (patcherInitialized) return;
@@ -2730,6 +2421,14 @@
         if (visualFsBtn) {
           visualFsBtn.onclick = () => VisualRenderer.toggleFullscreen();
         }
+      }
+
+      // Auto-start audio and visual engines
+      if (typeof AudioEngine !== 'undefined') {
+        AudioEngine.start();
+      }
+      if (typeof VisualRenderer !== 'undefined') {
+        VisualRenderer.enable();
       }
     }
 
@@ -2853,6 +2552,9 @@
         AudioEngine.updateData('hands', handData);
       }
     }
+
+    // Initialize patcher on page load (since it's the default view)
+    initAudioPatcher();
   </script>
 </body>
 </html>

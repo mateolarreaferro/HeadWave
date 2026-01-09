@@ -413,6 +413,59 @@ async def api_recording_export(session_id: str, format: str = "json", data_type:
         )
 
 
+# -------- Node-based Sender Endpoints --------
+@app.post("/api/node/osc/send")
+async def api_node_osc_send(payload: dict):
+    """Send OSC message from node (custom address/port)."""
+    address = payload.get("address", "/custom/value")
+    value = payload.get("value", 0)
+    ip = payload.get("ip", "127.0.0.1")
+    port = int(payload.get("port", 9000))
+
+    try:
+        from pythonosc import udp_client
+        client = udp_client.SimpleUDPClient(ip, port)
+        client.send_message(address, float(value))
+        return {"status": "ok"}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/node/midi/cc")
+async def api_node_midi_cc(payload: dict):
+    """Send MIDI CC from node."""
+    if not MIDI_AVAILABLE or midi_sender is None:
+        return JSONResponse({"status": "error", "message": "MIDI not available"}, status_code=503)
+
+    cc = int(payload.get("cc", 1))
+    value = int(payload.get("value", 0))
+    channel = int(payload.get("channel", 1))
+
+    try:
+        midi_sender.send_cc(cc, value, channel - 1)  # mido uses 0-indexed channels
+        return {"status": "ok"}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/node/midi/note")
+async def api_node_midi_note(payload: dict):
+    """Send MIDI note from node with duration."""
+    if not MIDI_AVAILABLE or midi_sender is None:
+        return JSONResponse({"status": "error", "message": "MIDI not available"}, status_code=503)
+
+    note = int(payload.get("note", 60))
+    velocity = int(payload.get("velocity", 100))
+    channel = int(payload.get("channel", 1))
+    duration = int(payload.get("duration", 100))
+
+    try:
+        midi_sender.send_note(note, velocity, channel - 1, duration)
+        return {"status": "ok"}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/api/calibration/start")
 async def api_calibration_start(payload: dict):
     if not CALIBRATION_AVAILABLE or calibration_wizard is None:

@@ -14,11 +14,22 @@ const Patcher = {
   dragging: null,
   connecting: null,
   selectedNode: null,
+  selectedNodes: new Set(), // For multi-select
   hoveredPort: null,
   hoveredCable: null,
   mousePos: { x: 0, y: 0 },
   isFullscreen: false,
   originalStyles: null,
+
+  // Zoom & Pan
+  zoom: 1.0,
+  minZoom: 0.25,
+  maxZoom: 2.0,
+  panOffset: { x: 0, y: 0 },
+
+  // Multi-select
+  isMultiSelecting: false,
+  selectionBox: null,
 
   // Layout
   nodeWidth: 180,
@@ -33,42 +44,44 @@ const Patcher = {
   embeddedCanvas: null,
   embeddedP5: null,
 
-  // Theme
+  // Theme (Light)
   theme: {
     bg: {
-      primary: '#0d1117',
-      secondary: '#161b22',
-      tertiary: '#21262d'
+      primary: '#fafafa',
+      secondary: '#f0f0f0',
+      tertiary: '#e5e5e5'
     },
     accent: {
       source: '#f97316',      // Orange
-      processor: '#06b6d4',   // Cyan
-      modulator: '#a855f7',   // Purple
-      output: '#22c55e',      // Green
-      data: '#3b82f6',        // Blue
-      visual: '#ec4899',      // Pink
-      visual_output: '#f43f5e' // Rose
+      processor: '#0891b2',   // Cyan (darker for light bg)
+      modulator: '#9333ea',   // Purple (darker)
+      output: '#16a34a',      // Green (darker)
+      data: '#2563eb',        // Blue (darker)
+      visual: '#db2777',      // Pink (darker)
+      visual_output: '#e11d48', // Rose (darker)
+      sender: '#dc2626',      // Red (darker)
+      visualization: '#0d9488' // Teal (darker)
     },
     text: {
-      primary: '#f0f6fc',
-      secondary: '#8b949e',
-      muted: '#484f58'
+      primary: '#1a1a1a',
+      secondary: '#666666',
+      muted: '#999999'
     },
     port: {
-      input: '#58a6ff',
+      input: '#2563eb',
       output: '#f97316',
-      hover: '#ffffff'
+      hover: '#000000'
     },
     cable: {
-      default: '#58a6ff',
-      active: '#a855f7',
-      glow: 'rgba(88, 166, 255, 0.3)'
+      default: '#2563eb',
+      active: '#9333ea',
+      glow: 'rgba(37, 99, 235, 0.2)'
     },
     node: {
-      bg: '#1c2128',
-      bgSelected: '#263038',
-      border: '#30363d',
-      borderSelected: '#58a6ff'
+      bg: '#ffffff',
+      bgSelected: '#f3f4f6',
+      border: '#e5e5e5',
+      borderSelected: '#2563eb'
     }
   },
 
@@ -95,16 +108,55 @@ const Patcher = {
     this.resize();
     window.addEventListener('resize', () => this.resize());
 
-    // Create fullscreen button
-    this.createFullscreenButton();
+    // Fullscreen button removed for cleaner UI
+    // this.createFullscreenButton();
 
     // Event listeners
     this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
 
-    // ESC to exit fullscreen
+    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+      // ESC to exit fullscreen
       if (e.key === 'Escape' && this.isFullscreen) {
         this.toggleFullscreen();
+        return;
+      }
+
+      // Only handle shortcuts if patcher canvas is focused
+      const focused = document.activeElement;
+      if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT')) {
+        return;
+      }
+
+      // Cmd/Ctrl + A: Select all nodes
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault();
+        this.selectAllNodes();
+        return;
+      }
+
+      // Delete or Backspace: Delete selected nodes
+      if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedNodes.size > 0) {
+        e.preventDefault();
+        this.deleteSelectedNodes();
+        return;
+      }
+
+      // Cmd/Ctrl + Plus: Zoom in
+      if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        this.zoomIn();
+        // Dispatch custom event for UI update
+        window.dispatchEvent(new CustomEvent('patcher-zoom-change', { detail: { zoom: this.zoom } }));
+        return;
+      }
+
+      // Cmd/Ctrl + Minus: Zoom out
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault();
+        this.zoomOut();
+        window.dispatchEvent(new CustomEvent('patcher-zoom-change', { detail: { zoom: this.zoom } }));
+        return;
       }
     });
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
@@ -234,8 +286,20 @@ const Patcher = {
     setTimeout(() => this.resize(), 50);
   },
 
-  // Get mouse position adjusted for HiDPI
+  // Get mouse position adjusted for HiDPI and zoom/pan
   getMousePos: function(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    // Adjust for zoom and pan
+    return {
+      x: (x - this.panOffset.x) / this.zoom,
+      y: (y - this.panOffset.y) / this.zoom
+    };
+  },
+
+  // Get raw mouse position (not adjusted for zoom/pan)
+  getRawMousePos: function(e) {
     const rect = this.canvas.getBoundingClientRect();
     return {
       x: e.clientX - rect.left,
@@ -299,10 +363,13 @@ const Patcher = {
   // Get node dimensions based on type
   getNodeDimensions: function(node) {
     const isCanvasNode = node.type === 'canvas';
-    return {
-      width: isCanvasNode ? this.canvasNodeWidth : this.nodeWidth,
-      height: isCanvasNode ? this.canvasNodeHeight : this.nodeHeight
-    };
+    const isVizNode = node.type === 'fftViz' || node.type === 'timeSeriesViz' || node.type === 'bandsViz';
+    if (isCanvasNode) {
+      return { width: this.canvasNodeWidth, height: this.canvasNodeHeight };
+    } else if (isVizNode) {
+      return { width: 200, height: 140 };  // Larger for chart preview
+    }
+    return { width: this.nodeWidth, height: this.nodeHeight };
   },
 
   // Get node at position
@@ -412,6 +479,7 @@ const Patcher = {
   // Mouse handlers
   onMouseDown: function(e) {
     const pos = this.getMousePos(e);
+    const shiftKey = e.shiftKey;
 
     // Check port click
     const port = this.getPortAt(pos.x, pos.y);
@@ -424,8 +492,38 @@ const Patcher = {
     // Check node click
     const node = this.getNodeAt(pos.x, pos.y);
     if (node) {
-      this.selectedNode = node.id;
-      this.dragging = { node, offsetX: pos.x - node.x, offsetY: pos.y - node.y };
+      if (shiftKey) {
+        // Shift+click: toggle multi-selection
+        this.toggleNodeSelection(node.id);
+        // Also set as primary selected for compatibility
+        this.selectedNode = node.id;
+      } else {
+        // Regular click: if node is not in multi-selection, clear selection
+        if (!this.selectedNodes.has(node.id)) {
+          this.clearSelection();
+        }
+        this.selectedNode = node.id;
+        this.selectedNodes.add(node.id);
+      }
+
+      // Calculate offsets for all selected nodes (for multi-drag)
+      this.dragging = {
+        node,
+        offsetX: pos.x - node.x,
+        offsetY: pos.y - node.y,
+        nodeOffsets: new Map()
+      };
+
+      // Store offsets for all selected nodes
+      for (const nodeId of this.selectedNodes) {
+        const n = this.nodes.find(nd => nd.id === nodeId);
+        if (n) {
+          this.dragging.nodeOffsets.set(nodeId, {
+            offsetX: pos.x - n.x,
+            offsetY: pos.y - n.y
+          });
+        }
+      }
 
       // Bring to front
       const idx = this.nodes.indexOf(node);
@@ -433,7 +531,15 @@ const Patcher = {
       this.nodes.push(node);
       this.canvas.style.cursor = 'grabbing';
     } else {
-      this.selectedNode = null;
+      // Click on empty space
+      if (shiftKey) {
+        // Shift+click on empty: start selection box
+        this.isMultiSelecting = true;
+        this.selectionBox = { startX: pos.x, startY: pos.y, endX: pos.x, endY: pos.y };
+      } else {
+        // Regular click on empty: clear selection
+        this.clearSelection();
+      }
     }
   },
 
@@ -441,12 +547,33 @@ const Patcher = {
     const pos = this.getMousePos(e);
     this.mousePos = pos;
 
-    if (this.dragging) {
-      this.dragging.node.x = pos.x - this.dragging.offsetX;
-      this.dragging.node.y = pos.y - this.dragging.offsetY;
-      if (AudioEngine.nodes[this.dragging.node.id]) {
-        AudioEngine.nodes[this.dragging.node.id].x = this.dragging.node.x;
-        AudioEngine.nodes[this.dragging.node.id].y = this.dragging.node.y;
+    if (this.isMultiSelecting && this.selectionBox) {
+      // Update selection box
+      this.selectionBox.endX = pos.x;
+      this.selectionBox.endY = pos.y;
+    } else if (this.dragging) {
+      // Move all selected nodes together
+      if (this.selectedNodes.size > 1 && this.dragging.nodeOffsets) {
+        for (const nodeId of this.selectedNodes) {
+          const n = this.nodes.find(nd => nd.id === nodeId);
+          const offsets = this.dragging.nodeOffsets.get(nodeId);
+          if (n && offsets) {
+            n.x = pos.x - offsets.offsetX;
+            n.y = pos.y - offsets.offsetY;
+            if (AudioEngine.nodes[nodeId]) {
+              AudioEngine.nodes[nodeId].x = n.x;
+              AudioEngine.nodes[nodeId].y = n.y;
+            }
+          }
+        }
+      } else {
+        // Single node drag
+        this.dragging.node.x = pos.x - this.dragging.offsetX;
+        this.dragging.node.y = pos.y - this.dragging.offsetY;
+        if (AudioEngine.nodes[this.dragging.node.id]) {
+          AudioEngine.nodes[this.dragging.node.id].x = this.dragging.node.x;
+          AudioEngine.nodes[this.dragging.node.id].y = this.dragging.node.y;
+        }
       }
     } else if (this.connecting) {
       this.connecting.x = pos.x;
@@ -474,7 +601,21 @@ const Patcher = {
   onMouseUp: function(e) {
     const pos = this.getMousePos(e);
 
-    if (this.connecting) {
+    if (this.isMultiSelecting && this.selectionBox) {
+      // Complete selection box - select all nodes within it
+      const box = this.normalizeBox(this.selectionBox);
+
+      for (const node of this.nodes) {
+        const dim = this.getNodeDimensions(node);
+        if (this.boxIntersects(box, node.x, node.y, dim.width, dim.height)) {
+          this.selectedNodes.add(node.id);
+        }
+      }
+
+      // Clear selection box state
+      this.isMultiSelecting = false;
+      this.selectionBox = null;
+    } else if (this.connecting) {
       const port = this.getPortAt(pos.x, pos.y);
       if (port && port.type === 'input' && port.node.id !== this.connecting.fromNode) {
         this.connectNodes(this.connecting.fromNode, this.connecting.fromPort, port.node.id, port.port);
@@ -582,7 +723,24 @@ const Patcher = {
           icon: '◈', color: this.theme.accent.output,
           items: [
             { type: 'output', icon: '◈', desc: 'Audio output' },
-            { type: 'canvas', icon: '▣', desc: 'Visual output' }
+            { type: 'canvas', icon: '▣', desc: 'Visual output' },
+            { type: 'recording', icon: '⏺', desc: 'Session recorder' }
+          ]
+        },
+        'Senders': {
+          icon: '↗', color: this.theme.accent.sender,
+          items: [
+            { type: 'oscSender', icon: '○', desc: 'Send OSC' },
+            { type: 'midiCCSender', icon: '♪', desc: 'Send MIDI CC' },
+            { type: 'midiNoteSender', icon: '♫', desc: 'Send MIDI Note' }
+          ]
+        },
+        'Visualization': {
+          icon: '◐', color: this.theme.accent.visualization,
+          items: [
+            { type: 'fftViz', icon: '▁▃▅▇', desc: 'FFT spectrum' },
+            { type: 'timeSeriesViz', icon: '〜', desc: 'Time series' },
+            { type: 'bandsViz', icon: '▥', desc: 'Band powers' }
           ]
         }
       };
@@ -848,17 +1006,30 @@ const Patcher = {
     const w = this.canvas.width / this.dpr;
     const h = this.canvas.height / this.dpr;
 
-    // Background
+    // Clear and reset transform
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    // Background (full canvas, not affected by zoom)
     ctx.fillStyle = this.theme.bg.primary;
     ctx.fillRect(0, 0, w, h);
 
-    // Grid dots
+    // Apply zoom and pan transform
+    ctx.save();
+    ctx.translate(this.panOffset.x, this.panOffset.y);
+    ctx.scale(this.zoom, this.zoom);
+
+    // Grid dots (affected by zoom)
     ctx.fillStyle = this.theme.text.muted + '30';
     const gridSize = 30;
-    for (let x = gridSize; x < w; x += gridSize) {
-      for (let y = gridSize; y < h; y += gridSize) {
+    const startX = -this.panOffset.x / this.zoom;
+    const startY = -this.panOffset.y / this.zoom;
+    const endX = (w - this.panOffset.x) / this.zoom;
+    const endY = (h - this.panOffset.y) / this.zoom;
+
+    for (let x = Math.floor(startX / gridSize) * gridSize; x < endX; x += gridSize) {
+      for (let y = Math.floor(startY / gridSize) * gridSize; y < endY; y += gridSize) {
         ctx.beginPath();
-        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.arc(x, y, 1.5 / this.zoom, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -884,7 +1055,22 @@ const Patcher = {
       this.drawNode(node);
     }
 
-    // Instructions overlay (if no nodes)
+    // Selection box
+    if (this.isMultiSelecting && this.selectionBox) {
+      const box = this.normalizeBox(this.selectionBox);
+      ctx.strokeStyle = this.theme.port.input;
+      ctx.lineWidth = 1 / this.zoom;
+      ctx.setLineDash([5 / this.zoom, 5 / this.zoom]);
+      ctx.strokeRect(box.x, box.y, box.width, box.height);
+      ctx.fillStyle = this.theme.port.input + '15';
+      ctx.fillRect(box.x, box.y, box.width, box.height);
+      ctx.setLineDash([]);
+    }
+
+    // Restore transform
+    ctx.restore();
+
+    // Instructions overlay (if no nodes) - not affected by zoom
     if (this.nodes.length === 0) {
       ctx.fillStyle = this.theme.text.muted;
       ctx.font = '14px -apple-system, system-ui, sans-serif';
@@ -893,6 +1079,19 @@ const Patcher = {
       ctx.fillText('Right-click to add nodes', w / 2, h / 2 - 20);
       ctx.font = '12px -apple-system, system-ui, sans-serif';
       ctx.fillText('Drag from output ports to connect', w / 2, h / 2 + 10);
+    }
+
+    // Zoom indicator in corner (when zoomed)
+    if (this.zoom !== 1.0) {
+      ctx.fillStyle = this.theme.bg.tertiary;
+      ctx.beginPath();
+      ctx.roundRect(10, h - 30, 60, 20, 4);
+      ctx.fill();
+      ctx.fillStyle = this.theme.text.secondary;
+      ctx.font = '11px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${Math.round(this.zoom * 100)}%`, 20, h - 20);
     }
 
     requestAnimationFrame(() => this.render());
@@ -907,7 +1106,8 @@ const Patcher = {
     const h = isCanvasNode ? this.canvasNodeHeight : this.nodeHeight;
     const r = this.cornerRadius;
     const hh = this.headerHeight;
-    const isSelected = node.id === this.selectedNode;
+    const isSelected = node.id === this.selectedNode || this.selectedNodes.has(node.id);
+    const isMultiSelected = this.selectedNodes.has(node.id) && this.selectedNodes.size > 1;
     const accentColor = this.theme.accent[node.category] || this.theme.accent.processor;
 
     // Get live value from AudioEngine
@@ -931,12 +1131,16 @@ const Patcher = {
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
 
-    // Border
+    // Border - multi-selected nodes get dashed border
     ctx.strokeStyle = isSelected ? this.theme.node.borderSelected : this.theme.node.border;
     ctx.lineWidth = isSelected ? 2 : 1;
+    if (isMultiSelected) {
+      ctx.setLineDash([4, 4]);
+    }
     ctx.beginPath();
     ctx.roundRect(x, y, w, h, r);
     ctx.stroke();
+    ctx.setLineDash([]);
 
     // Header accent line
     ctx.fillStyle = accentColor;
@@ -1015,6 +1219,122 @@ const Patcher = {
           py += 16;
           ctx.fillText('audio file...', x + 12, py);
         }
+      } else if (node.type === 'recording') {
+        // Special rendering for recording node
+        const isRecording = AudioEngine.recording?.isRecording || false;
+        const duration = AudioEngine.getRecordingDuration?.() || 0;
+
+        if (isRecording) {
+          // Recording indicator - pulsing red dot
+          const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
+          ctx.fillStyle = `rgba(239, 68, 68, ${0.5 + pulse * 0.5})`;
+          ctx.beginPath();
+          ctx.arc(x + 20, py + 2, 6, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#ef4444';
+          ctx.fillText('REC', x + 32, py + 6);
+
+          // Duration display
+          py += 20;
+          const mins = Math.floor(duration / 60);
+          const secs = Math.floor(duration % 60);
+          const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+          ctx.fillStyle = this.theme.text.primary;
+          ctx.font = '600 14px -apple-system, system-ui, monospace';
+          ctx.fillText(timeStr, x + 12, py + 4);
+        } else {
+          ctx.fillStyle = this.theme.text.muted;
+          ctx.beginPath();
+          ctx.arc(x + 20, py + 2, 6, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = this.theme.text.secondary;
+          ctx.fillText('IDLE', x + 32, py + 6);
+
+          py += 20;
+          ctx.fillStyle = this.theme.text.muted;
+          ctx.font = '11px -apple-system, system-ui, sans-serif';
+          ctx.fillText(`mode: ${node.params.mode || 'toggle'}`, x + 12, py + 4);
+        }
+      } else if (node.type === 'bandsViz') {
+        // Bands visualization - draw bar chart
+        const audioNode = AudioEngine.nodes[node.id];
+        const bandValues = audioNode?.bandValues || { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
+        const bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+        const colors = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444'];
+        const chartX = x + 12;
+        const chartY = y + hh + 8;
+        const chartW = w - 24;
+        const chartH = h - hh - 24;
+        const barWidth = (chartW - (bands.length - 1) * 4) / bands.length;
+
+        // Chart background
+        ctx.fillStyle = this.theme.bg.primary;
+        ctx.beginPath();
+        ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+        ctx.fill();
+
+        // Draw bars
+        bands.forEach((band, i) => {
+          const value = bandValues[band] || 0;
+          const barH = value * (chartH - 8);
+          const bx = chartX + i * (barWidth + 4);
+          const by = chartY + chartH - 4 - barH;
+
+          ctx.fillStyle = colors[i];
+          ctx.beginPath();
+          ctx.roundRect(bx, by, barWidth, barH, 2);
+          ctx.fill();
+        });
+
+        // Labels
+        ctx.font = '8px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = this.theme.text.muted;
+        bands.forEach((band, i) => {
+          const bx = chartX + i * (barWidth + 4) + barWidth / 2;
+          ctx.fillText(band[0].toUpperCase(), bx, chartY + chartH + 8);
+        });
+        ctx.textAlign = 'left';
+
+      } else if (node.type === 'fftViz' || node.type === 'timeSeriesViz') {
+        // Time series / FFT visualization placeholder
+        const chartX = x + 12;
+        const chartY = y + hh + 8;
+        const chartW = w - 24;
+        const chartH = h - hh - 24;
+
+        // Chart background
+        ctx.fillStyle = this.theme.bg.primary;
+        ctx.beginPath();
+        ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+        ctx.fill();
+
+        // Draw simulated waveform
+        ctx.strokeStyle = node.type === 'fftViz' ? '#06b6d4' : '#22c55e';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const points = 32;
+        for (let i = 0; i < points; i++) {
+          const px = chartX + (i / (points - 1)) * chartW;
+          const phase = Date.now() / 500 + i * 0.3;
+          const amplitude = node.type === 'fftViz'
+            ? Math.abs(Math.sin(phase) * Math.exp(-i / 20))
+            : Math.sin(phase);
+          const py2 = chartY + chartH / 2 - amplitude * (chartH / 3);
+          if (i === 0) ctx.moveTo(px, py2);
+          else ctx.lineTo(px, py2);
+        }
+        ctx.stroke();
+
+        // Label
+        ctx.font = '10px -apple-system, system-ui, sans-serif';
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.textAlign = 'center';
+        ctx.fillText(node.type === 'fftViz' ? 'FFT Preview' : 'Time Series', x + w / 2, y + h - 8);
+        ctx.textAlign = 'left';
+
       } else {
         const paramKeys = Object.keys(node.params).slice(0, 2);
         for (const key of paramKeys) {
@@ -1199,6 +1519,95 @@ const Patcher = {
     for (const cable of patch.cables || []) {
       this.connectNodes(cable.fromNode, cable.fromPort, cable.toNode, cable.toPort);
     }
+  },
+
+  // -------- Zoom Methods --------
+  setZoom: function(level) {
+    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, level));
+  },
+
+  zoomIn: function() {
+    this.setZoom(this.zoom * 1.25);
+  },
+
+  zoomOut: function() {
+    this.setZoom(this.zoom / 1.25);
+  },
+
+  // -------- Theme Support --------
+  themes: {
+    dark: {
+      bg: { primary: '#0d1117', secondary: '#161b22', tertiary: '#21262d' },
+      text: { primary: '#f0f6fc', secondary: '#8b949e', muted: '#484f58' },
+      node: { bg: '#1c2128', bgSelected: '#263038', border: '#30363d', borderSelected: '#58a6ff' },
+      port: { input: '#58a6ff', output: '#f97316', hover: '#ffffff' },
+      cable: { default: '#58a6ff', active: '#a855f7', glow: 'rgba(88, 166, 255, 0.3)' }
+    },
+    light: {
+      bg: { primary: '#ffffff', secondary: '#f6f8fa', tertiary: '#eaeef2' },
+      text: { primary: '#24292f', secondary: '#57606a', muted: '#8c959f' },
+      node: { bg: '#ffffff', bgSelected: '#f3f4f6', border: '#d0d7de', borderSelected: '#0969da' },
+      port: { input: '#0969da', output: '#bf8700', hover: '#24292f' },
+      cable: { default: '#0969da', active: '#8250df', glow: 'rgba(9, 105, 218, 0.3)' }
+    }
+  },
+
+  currentTheme: 'dark',
+
+  setTheme: function(themeName) {
+    if (this.themes[themeName]) {
+      const newTheme = this.themes[themeName];
+      this.theme.bg = { ...newTheme.bg };
+      this.theme.text = { ...newTheme.text };
+      this.theme.node = { ...newTheme.node };
+      this.theme.port = { ...newTheme.port };
+      this.theme.cable = { ...newTheme.cable };
+      this.currentTheme = themeName;
+    }
+  },
+
+  // -------- Multi-Select Methods --------
+  isNodeSelected: function(nodeId) {
+    return this.selectedNodes.has(nodeId);
+  },
+
+  toggleNodeSelection: function(nodeId) {
+    if (this.selectedNodes.has(nodeId)) {
+      this.selectedNodes.delete(nodeId);
+    } else {
+      this.selectedNodes.add(nodeId);
+    }
+  },
+
+  selectAllNodes: function() {
+    for (const node of this.nodes) {
+      this.selectedNodes.add(node.id);
+    }
+  },
+
+  clearSelection: function() {
+    this.selectedNodes.clear();
+    this.selectedNode = null;
+  },
+
+  deleteSelectedNodes: function() {
+    for (const nodeId of this.selectedNodes) {
+      this.removeNode(nodeId);
+    }
+    this.selectedNodes.clear();
+  },
+
+  // -------- Helper for box intersection --------
+  boxIntersects: function(box, x, y, w, h) {
+    return !(box.x + box.width < x || x + w < box.x || box.y + box.height < y || y + h < box.y);
+  },
+
+  normalizeBox: function(box) {
+    const x = Math.min(box.startX, box.endX);
+    const y = Math.min(box.startY, box.endY);
+    const width = Math.abs(box.endX - box.startX);
+    const height = Math.abs(box.endY - box.startY);
+    return { x, y, width, height };
   }
 };
 

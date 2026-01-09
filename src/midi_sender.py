@@ -243,3 +243,24 @@ class MIDISender:
             self.port.send(msg)
         except Exception as e:
             print(f"[MIDI] Error sending all notes off: {e}")
+
+    # Public methods for node-based sending
+    def send_cc(self, cc: int, value: int, channel: int = 0):
+        """Public method to send MIDI CC from node."""
+        with self.lock:
+            self._send_cc(cc, value, channel)
+
+    def send_note(self, note: int, velocity: int = 100, channel: int = 0, duration: int = 100):
+        """Public method to send MIDI note with duration from node."""
+        import threading
+
+        def note_off_delayed():
+            import time
+            time.sleep(duration / 1000.0)
+            self._send_note_off(note, channel)
+
+        with self.lock:
+            self._send_note(note, velocity, channel)
+
+        # Schedule note off
+        threading.Thread(target=note_off_delayed, daemon=True).start()
