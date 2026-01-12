@@ -10,6 +10,10 @@ const VisualRenderer = {
 
   particleState: {},
 
+  // AI Canvas state
+  aiCanvasInitialized: {},
+  aiCanvasDrawFunctions: {},
+
   init: function(previewContainerId) {
     this.previewContainer = document.getElementById(previewContainerId);
     if (!this.previewContainer) {
@@ -38,9 +42,13 @@ const VisualRenderer = {
 
       p.draw = function() {
         if (typeof AudioEngine !== 'undefined') {
-          const canvasNode = AudioEngine.getCanvasNode();
-          if (canvasNode) {
+          const canvasNode = AudioEngine.getCanvasNode?.();
+          const connectedVisuals = AudioEngine.getConnectedVisualNodes?.() || [];
+          if (canvasNode && connectedVisuals.length > 0) {
             self.enabled = true;
+          } else if (canvasNode) {
+            // Canvas exists but no visuals connected
+            self.enabled = false;
           }
         }
 
@@ -49,7 +57,7 @@ const VisualRenderer = {
           p.fill(100);
           p.textAlign(p.CENTER, p.CENTER);
           p.textSize(12);
-          p.text('Add a Canvas node', p.width / 2, p.height / 2);
+          p.text('Connect a visual node to Output', p.width / 2, p.height / 2);
           return;
         }
 
@@ -104,8 +112,18 @@ const VisualRenderer = {
     if (this.p5Instance) {
       this.p5Instance.remove();
     }
+
+    // Reset AI Canvas state so it reinitializes with new p5 instance
+    this.aiCanvasInitialized = {};
+    this.aiCanvasDrawFunctions = {};
+
+    // Force enable since we're entering fullscreen
+    this.enabled = true;
+
     this.createP5Instance(this.fullscreenContainer);
     this.isFullscreen = true;
+
+    console.log('[VisualRenderer] Entered fullscreen mode');
 
     document.addEventListener('keydown', this._escHandler = (e) => {
       if (e.key === 'Escape') this.exitFullscreen();
@@ -120,6 +138,11 @@ const VisualRenderer = {
     if (this.p5Instance) {
       this.p5Instance.remove();
     }
+
+    // Reset AI Canvas state
+    this.aiCanvasInitialized = {};
+    this.aiCanvasDrawFunctions = {};
+
     this.createP5Instance(this.previewContainer);
     this.isFullscreen = false;
 
@@ -127,18 +150,26 @@ const VisualRenderer = {
   },
 
   render: function(p) {
-    if (typeof AudioEngine === 'undefined') return;
+    if (typeof AudioEngine === 'undefined') {
+      console.log('[VisualRenderer] AudioEngine not defined');
+      return;
+    }
 
-    const canvasNode = AudioEngine.getCanvasNode();
-    if (!canvasNode) {
-      this.enabled = false;
+    // Check for Output node or Canvas node
+    const outputNode = AudioEngine.getOutputNode?.() || AudioEngine.getCanvasNode?.();
+    if (!outputNode) {
+      p.background(13, 17, 23);
+      p.fill(150);
+      p.textAlign(p.CENTER, p.CENTER);
+      p.textSize(12);
+      p.text('Add an Output node', p.width / 2, p.height / 2);
       return;
     }
 
     p.colorMode(p.RGB, 255);
 
-    const bgColor = canvasNode.params.background || '#0d1117';
-    const trails = canvasNode.params.trails || 0;
+    const bgColor = outputNode.params?.background || '#0d1117';
+    const trails = outputNode.params?.trails || 0;
 
     if (trails > 0) {
       const alpha = p.map(trails, 0, 100, 255, 10);
@@ -149,11 +180,175 @@ const VisualRenderer = {
       p.background(bgColor);
     }
 
-    // Only render nodes that are connected to the canvas
-    const connectedNodes = AudioEngine.getConnectedVisualNodes();
+    // Check for connected AI Canvas nodes
+    const connectedNodes = AudioEngine.getConnectedVisualNodes?.() || [];
 
+    // Debug logging (only once per second to avoid spam)
+    if (!this._lastDebugLog || Date.now() - this._lastDebugLog > 1000) {
+      console.log('[VisualRenderer] Connected visual nodes:', connectedNodes.length, connectedNodes.map(n => n.type));
+      this._lastDebugLog = Date.now();
+    }
+
+    if (connectedNodes.length === 0) {
+      p.fill(100);
+      p.textAlign(p.CENTER, p.CENTER);
+      p.textSize(12);
+      p.text('No visual nodes connected', p.width / 2, p.height / 2);
+      return;
+    }
+
+    // Render each connected visual node
+    let renderedCount = 0;
     for (const node of connectedNodes) {
-      this.renderNode(p, node);
+      if (node.type === 'aiCanvas') {
+        this.renderAICanvas(p, node);
+        renderedCount++;
+      } else {
+        this.renderNode(p, node);
+        renderedCount++;
+      }
+    }
+
+    // If we have nodes but nothing rendered, show debug info
+    if (connectedNodes.length > 0 && renderedCount === 0) {
+      p.fill(255, 200, 0);
+      p.textAlign(p.CENTER, p.CENTER);
+      p.textSize(14);
+      p.text(`${connectedNodes.length} nodes found but nothing rendered`, p.width / 2, p.height / 2);
+    }
+  },
+
+  // Render AI Canvas node
+  renderAICanvas: function(p, node) {
+    const nodeId = node.id;
+
+    // Get live node data from AudioEngine to ensure we have latest aiCode
+    const liveNode = AudioEngine.nodes[nodeId];
+    const aiCode = liveNode?.aiCode || node.aiCode;
+    const aiParams = liveNode?.aiParameters || node.aiParameters;
+
+    // Debug: log code status (throttled)
+    if (!this._lastCodeLog || Date.now() - this._lastCodeLog > 2000) {
+      console.log('[VisualRenderer] AI Canvas node:', nodeId);
+      console.log('[VisualRenderer] Has aiCode:', !!aiCode);
+      console.log('[VisualRenderer] Code length:', aiCode?.length || 0);
+      console.log('[VisualRenderer] Code preview:', aiCode?.substring(0, 100));
+      this._lastCodeLog = Date.now();
+    }
+
+    if (!aiCode) {
+      p.fill(150);
+      p.textAlign(p.CENTER, p.CENTER);
+      p.textSize(12);
+      p.text('No AI code generated', p.width / 2, p.height / 2);
+      return;
+    }
+
+    // Initialize the AI canvas code if not done yet
+    if (!this.aiCanvasInitialized[nodeId]) {
+      console.log('[VisualRenderer] Initializing AI Canvas:', nodeId);
+      console.log('[VisualRenderer] Full code:\n', aiCode);
+      try {
+        const self = this;
+
+        // Create a proxy p5 object that captures setup/draw
+        const capturedSetup = { fn: null };
+        const capturedDraw = { fn: null };
+
+        const proxyP = new Proxy(p, {
+          set: function(target, prop, value) {
+            if (prop === 'setup') {
+              capturedSetup.fn = value;
+              return true;
+            }
+            if (prop === 'draw') {
+              capturedDraw.fn = value;
+              return true;
+            }
+            target[prop] = value;
+            return true;
+          },
+          get: function(target, prop) {
+            if (prop === 'getParam') {
+              return function(name) {
+                const ln = AudioEngine.nodes[nodeId];
+                if (ln?.params && name in ln.params) {
+                  return ln.params[name];
+                }
+                const ap = (ln?.aiParameters || []).find(x => x.name === name);
+                return ap ? ap.default : 0;
+              };
+            }
+            return target[prop];
+          }
+        });
+
+        // Parse and execute the AI code
+        console.log('[VisualRenderer] Parsing AI code...');
+        const sketchFn = new Function('return ' + aiCode)();
+        console.log('[VisualRenderer] Got sketch function:', typeof sketchFn);
+        sketchFn(proxyP);
+        console.log('[VisualRenderer] Executed sketch function');
+        console.log('[VisualRenderer] Captured setup:', !!capturedSetup.fn);
+        console.log('[VisualRenderer] Captured draw:', !!capturedDraw.fn);
+
+        // Store the captured functions
+        if (capturedSetup.fn) {
+          // Run setup once, but don't create a new canvas
+          const origCreate = p.createCanvas;
+          p.createCanvas = function() { return p.canvas; };
+          try {
+            capturedSetup.fn.call(proxyP);
+          } catch (e) {
+            console.error('AI Canvas setup error:', e);
+          }
+          p.createCanvas = origCreate;
+        }
+
+        if (capturedDraw.fn) {
+          this.aiCanvasDrawFunctions[nodeId] = capturedDraw.fn;
+        }
+
+        this.aiCanvasInitialized[nodeId] = true;
+        console.log('[VisualRenderer] AI Canvas initialized successfully');
+      } catch (err) {
+        console.error('AI Canvas init error:', err);
+        this.aiCanvasInitialized[nodeId] = true;
+        // Show error
+        p.fill(255, 100, 100);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.text('Code Error: ' + err.message, p.width / 2, p.height / 2);
+        return;
+      }
+    }
+
+    // Run the draw function each frame
+    if (this.aiCanvasDrawFunctions[nodeId]) {
+      try {
+        // Create getParam function for this frame
+        p.getParam = function(name) {
+          const ln = AudioEngine.nodes[nodeId];
+          if (ln?.params && name in ln.params) {
+            return ln.params[name];
+          }
+          const ap = (ln?.aiParameters || []).find(x => x.name === name);
+          return ap ? ap.default : 0;
+        };
+
+        this.aiCanvasDrawFunctions[nodeId].call(p);
+      } catch (err) {
+        console.error('AI Canvas draw error:', err);
+        p.fill(255, 100, 100);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.textSize(14);
+        p.text('Draw Error: ' + err.message, p.width / 2, p.height / 2);
+      }
+    } else {
+      // No draw function captured - show fallback
+      p.fill(255, 200, 0);
+      p.textAlign(p.CENTER, p.CENTER);
+      p.textSize(14);
+      p.text('No draw function captured', p.width / 2, p.height / 2);
     }
   },
 
@@ -336,6 +531,28 @@ const VisualRenderer = {
     ctx.save();
 
     switch (node.type) {
+      case 'aiCanvas':
+        // AI Canvas preview - show indicator that it's active
+        const liveNode = AudioEngine.nodes[node.id];
+        if (liveNode?.aiCode) {
+          // Draw animated indicator
+          const t = Date.now() / 1000;
+          ctx.fillStyle = `hsl(${(t * 50) % 360}, 70%, 50%)`;
+          ctx.beginPath();
+          ctx.arc(ox + w/2, oy + h/2, Math.min(w, h) * 0.3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = '10px -apple-system';
+          ctx.textAlign = 'center';
+          ctx.fillText('AI Visual Active', ox + w/2, oy + h - 10);
+        } else {
+          ctx.fillStyle = '#666';
+          ctx.font = '10px -apple-system';
+          ctx.textAlign = 'center';
+          ctx.fillText('No AI code', ox + w/2, oy + h/2);
+        }
+        break;
+
       case 'ellipse':
         this.applyFillStrokeCtx(ctx, params);
         if (params.rotation) {

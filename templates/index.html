@@ -7,9 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
   <script src="/static/sketch.js"></script>
-  <script src="/static/engine.js?v=9"></script>
-  <script src="/static/visual.js?v=3"></script>
-  <script src="/static/patcher.js?v=8"></script>
+  <script src="/static/engine.js?v=12"></script>
+  <script src="/static/visual.js?v=6"></script>
+  <script src="/static/patcher.js?v=11"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -1800,8 +1800,16 @@
         const msg = JSON.parse(event.data);
         if (msg.type === "timeseries") {
           updateTimeSeriesChart(msg.channels, msg.data);
+          // Push to AudioEngine vizData for node visualization
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.pushTimeSeries) {
+            AudioEngine.pushTimeSeries(msg.data);
+          }
         } else if (msg.type === "fft") {
           updateFFTChart(msg.channels, msg.freqs, msg.psd);
+          // Push to AudioEngine vizData for node visualization
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.pushFFT) {
+            AudioEngine.pushFFT(msg.freqs, msg.psd);
+          }
         } else if (msg.type === "bands") {
           updateBandsChart(msg.channels, msg.bands, msg.values);
           // Send EEG data to audio engine for modulation

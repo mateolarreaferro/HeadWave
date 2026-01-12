@@ -38,145 +38,138 @@ const AudioEngine = {
     duration: 0
   },
 
-  // Visualization data buffers (per node ID)
-  vizData: {},
-
-  // Node type definitions
-  nodeTypes: {
-    // Sources
-    oscillator: {
-      name: 'Oscillator',
-      category: 'source',
-      inputs: ['frequency', 'detune'],
-      outputs: ['audio'],
-      params: {
-        type: { default: 'sine', options: ['sine', 'square', 'sawtooth', 'triangle'] },
-        frequency: { default: 440, min: 20, max: 2000 },
-        detune: { default: 0, min: -1200, max: 1200 }
-      }
+  // Visualization data buffers - global shared buffers
+  vizData: {
+    timeSeries: {
+      channels: [[], [], [], [], [], [], [], []], // Rolling buffers per channel (up to 8)
+      maxPoints: 200
     },
-    noise: {
-      name: 'Noise',
-      category: 'source',
-      inputs: [],
+    fft: {
+      freqs: [],
+      psd: [[], [], [], [], [], [], [], []] // PSD per channel
+    }
+  },
+
+  // Node type definitions - New consolidated categories
+  nodeTypes: {
+    // ============ AUDIO ============
+    toneGenerator: {
+      name: 'Tone Generator',
+      category: 'audio',
+      inputs: ['frequency', 'detune', 'gain'],
       outputs: ['audio'],
       params: {
-        type: { default: 'white', options: ['white', 'pink', 'brown'] }
+        mode: { default: 'oscillator', options: ['oscillator', 'noise'] },
+        waveform: { default: 'sine', options: ['sine', 'square', 'sawtooth', 'triangle'] },
+        noiseType: { default: 'white', options: ['white', 'pink', 'brown'] },
+        frequency: { default: 440, min: 20, max: 2000 },
+        detune: { default: 0, min: -1200, max: 1200 },
+        gain: { default: 0.5, min: 0, max: 1 }
       }
     },
     sampler: {
       name: 'Sampler',
-      category: 'source',
-      inputs: ['speed'],
+      category: 'audio',
+      inputs: ['speed', 'trigger'],
       outputs: ['audio'],
       params: {
         speed: { default: 1, min: 0.1, max: 4 },
-        loop: { default: true, options: [true, false] }
+        loop: { default: true, options: [true, false] },
+        reverse: { default: false, options: [true, false] },
+        startPosition: { default: 0, min: 0, max: 1 }
       }
     },
-
-    // Processors
     filter: {
       name: 'Filter',
-      category: 'processor',
+      category: 'audio',
       inputs: ['audio', 'frequency', 'Q'],
       outputs: ['audio'],
       params: {
-        type: { default: 'lowpass', options: ['lowpass', 'highpass', 'bandpass', 'notch'] },
+        mode: { default: 'lpf', options: ['lpf', 'hpf', 'bpf'] },
         frequency: { default: 1000, min: 20, max: 20000 },
         Q: { default: 1, min: 0.1, max: 20 }
       }
     },
-    gain: {
-      name: 'Gain',
-      category: 'processor',
-      inputs: ['audio', 'gain'],
+    effects: {
+      name: 'Effects',
+      category: 'audio',
+      inputs: ['audio', 'mix'],
       outputs: ['audio'],
       params: {
-        gain: { default: 0.5, min: 0, max: 2 }
-      }
-    },
-    delay: {
-      name: 'Delay',
-      category: 'processor',
-      inputs: ['audio', 'time'],
-      outputs: ['audio'],
-      params: {
-        time: { default: 0.3, min: 0, max: 2 },
-        feedback: { default: 0.3, min: 0, max: 0.95 }
-      }
-    },
-    reverb: {
-      name: 'Reverb',
-      category: 'processor',
-      inputs: ['audio'],
-      outputs: ['audio'],
-      params: {
+        type: { default: 'delay', options: ['delay', 'reverb', 'chorus'] },
+        // Delay params
+        delayTime: { default: 0.3, min: 0, max: 2 },
+        feedback: { default: 0.3, min: 0, max: 0.95 },
+        // Reverb params
         decay: { default: 2, min: 0.1, max: 10 },
-        wet: { default: 0.3, min: 0, max: 1 }
+        // Chorus params
+        rate: { default: 1.5, min: 0.1, max: 10 },
+        depth: { default: 0.5, min: 0, max: 1 },
+        // Common
+        mix: { default: 0.3, min: 0, max: 1 }
       }
     },
 
-    // Modulators
+    // ============ MODULATORS ============
+    face: {
+      name: 'Face',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['mouth', 'smile', 'yaw', 'roll', 'brow'],
+      params: {
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+    hands: {
+      name: 'Hands',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['leftX', 'leftY', 'leftPinch', 'leftOpen', 'rightX', 'rightY', 'rightPinch', 'rightOpen'],
+      params: {
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+    eeg: {
+      name: 'EEG',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['value'],
+      params: {
+        mode: { default: 'bands', options: ['bands', 'timeseries', 'fft'] },
+        // Bands mode
+        band: { default: 'alpha', options: ['delta', 'theta', 'alpha', 'beta', 'gamma'] },
+        // Time series mode
+        channel: { default: 1, min: 1, max: 8 },
+        metric: { default: 'amplitude', options: ['amplitude', 'rms', 'peak', 'mean'] },
+        // FFT mode
+        fftBin: { default: 10, min: 1, max: 64 },
+        // Common
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
+    eyes: {
+      name: 'Eyes',
+      category: 'modulator',
+      inputs: [],
+      outputs: ['x', 'y', 'confidence'],
+      params: {
+        smoothing: { default: 0.1, min: 0, max: 1 }
+      }
+    },
     lfo: {
       name: 'LFO',
       category: 'modulator',
       inputs: ['rate'],
       outputs: ['signal'],
       params: {
-        type: { default: 'sine', options: ['sine', 'square', 'sawtooth', 'triangle'] },
+        waveform: { default: 'sine', options: ['sine', 'square', 'sawtooth', 'triangle'] },
         rate: { default: 1, min: 0.01, max: 20 },
         depth: { default: 1, min: 0, max: 1 }
       }
     },
-    eegBand: {
-      name: 'EEG Band',
-      category: 'modulator',
-      inputs: [],
-      outputs: ['signal'],
-      params: {
-        band: { default: 'alpha', options: ['delta', 'theta', 'alpha', 'beta', 'gamma'] },
-        smoothing: { default: 0.1, min: 0, max: 1 }
-      }
-    },
-    cvFeature: {
-      name: 'CV Feature',
-      category: 'modulator',
-      inputs: [],
-      outputs: ['signal'],
-      params: {
-        feature: {
-          default: 'mouth',
-          options: [
-            'mouth',          // Mouth openness (0-1)
-            'yaw',            // Head left/right rotation
-            'roll',           // Head tilt
-            'roll_relative',  // Head tilt normalized (0-1)
-            'smile',          // Smile curvature
-            'brow',           // Eyebrow raise
-            'gaze_x',         // Eye gaze horizontal (-1 to 1 -> 0-1)
-            'gaze_y',         // Eye gaze vertical (-1 to 1 -> 0-1)
-            'gaze_confidence', // Eye tracking confidence
-            'engagement'      // Derived engagement metric
-          ]
-        },
-        smoothing: { default: 0.1, min: 0, max: 1 }
-      }
-    },
-    handFeature: {
-      name: 'Hand Feature',
-      category: 'modulator',
-      inputs: [],
-      outputs: ['signal'],
-      params: {
-        hand: { default: 'left', options: ['left', 'right'] },
-        feature: { default: 'detected', options: ['detected', 'pinch', 'openness', 'x', 'y', 'z'] },
-        smoothing: { default: 0.1, min: 0, max: 1 }
-      }
-    },
     scale: {
-      name: 'Range',
-      category: 'processor',
+      name: 'Scale',
+      category: 'modulator',
       inputs: ['signal'],
       outputs: ['signal'],
       params: {
@@ -185,108 +178,15 @@ const AudioEngine = {
       }
     },
 
-    // Output
-    output: {
-      name: 'Output',
-      category: 'output',
-      inputs: ['audio'],
-      outputs: [],
-      params: {}
-    },
-
-    // Recording node
-    recording: {
-      name: 'Recording',
-      category: 'output',
-      inputs: ['trigger'],
-      outputs: ['status'],
+    // ============ VISUALS ============
+    aiCanvas: {
+      name: 'AI Canvas',
+      category: 'visual',
+      inputs: [],  // Dynamically populated after AI generates code
+      outputs: ['draw'],
       params: {
-        autoStop: { default: 0, min: 0, max: 600 },  // Auto-stop after X seconds (0 = disabled)
-        mode: { default: 'toggle', options: ['toggle', 'gate'] }  // toggle = click to start/stop, gate = high = record
-      }
-    },
-
-    // Sender nodes (OSC/MIDI output)
-    oscSender: {
-      name: 'OSC Send',
-      category: 'sender',
-      inputs: ['value'],
-      outputs: [],
-      params: {
-        address: { default: '/custom/value' },
-        ip: { default: '127.0.0.1' },
-        port: { default: 9000, min: 1024, max: 65535 }
-      }
-    },
-
-    midiCCSender: {
-      name: 'MIDI CC',
-      category: 'sender',
-      inputs: ['value'],
-      outputs: [],
-      params: {
-        cc: { default: 1, min: 0, max: 127 },
-        channel: { default: 1, min: 1, max: 16 },
-        scale: { default: 127, min: 1, max: 127 }  // Max value to scale to
-      }
-    },
-
-    midiNoteSender: {
-      name: 'MIDI Note',
-      category: 'sender',
-      inputs: ['trigger', 'velocity'],
-      outputs: [],
-      params: {
-        note: { default: 60, min: 0, max: 127 },
-        channel: { default: 1, min: 1, max: 16 },
-        duration: { default: 100, min: 10, max: 5000 }  // Duration in ms
-      }
-    },
-
-    // Visualization nodes
-    fftViz: {
-      name: 'FFT Viz',
-      category: 'visualization',
-      inputs: [],
-      outputs: ['signal'],
-      params: {
-        channel: { default: 1, min: 1, max: 8 },
-        windowSec: { default: 1, min: 0.5, max: 4 },
-        colorScheme: { default: 'cyan', options: ['cyan', 'purple', 'green', 'orange'] }
-      }
-    },
-
-    timeSeriesViz: {
-      name: 'Time Series',
-      category: 'visualization',
-      inputs: [],
-      outputs: ['signal'],
-      params: {
-        channel: { default: 1, min: 1, max: 8 },
-        windowSec: { default: 4, min: 1, max: 10 },
-        scale: { default: 100, min: 10, max: 500 }
-      }
-    },
-
-    bandsViz: {
-      name: 'Bands Viz',
-      category: 'visualization',
-      inputs: [],
-      outputs: ['delta', 'theta', 'alpha', 'beta', 'gamma'],
-      params: {
-        displayMode: { default: 'bars', options: ['bars', 'radar', 'lines'] }
-      }
-    },
-
-    // Visual nodes
-    canvas: {
-      name: 'Canvas',
-      category: 'visual_output',
-      inputs: ['draw'],
-      outputs: [],
-      params: {
-        background: { default: '#0d1117' },
-        trails: { default: 0, min: 0, max: 100 }
+        prompt: { default: '', type: 'text', placeholder: 'Describe your visual...' },
+        background: { default: '#0d1117', type: 'color' }
       }
     },
     ellipse: {
@@ -300,8 +200,8 @@ const AudioEngine = {
         width: { default: 0.1, min: 0, max: 1 },
         height: { default: 0.1, min: 0, max: 1 },
         rotation: { default: 0, min: 0, max: 360 },
-        fill: { default: '#ffffff' },
-        stroke: { default: 'none' },
+        fill: { default: '#ffffff', type: 'color' },
+        stroke: { default: 'none', type: 'color' },
         strokeWeight: { default: 2, min: 0, max: 20 }
       }
     },
@@ -317,96 +217,87 @@ const AudioEngine = {
         height: { default: 0.1, min: 0, max: 1 },
         rotation: { default: 0, min: 0, max: 360 },
         cornerRadius: { default: 0, min: 0, max: 100 },
-        fill: { default: '#ffffff' },
-        stroke: { default: 'none' },
+        fill: { default: '#ffffff', type: 'color' },
+        stroke: { default: 'none', type: 'color' },
         strokeWeight: { default: 2, min: 0, max: 20 }
       }
     },
-    line: {
-      name: 'Line',
-      category: 'visual',
-      inputs: ['x1', 'y1', 'x2', 'y2', 'color'],
-      outputs: ['draw'],
+
+    // ============ SENDERS ============
+    midi: {
+      name: 'MIDI',
+      category: 'sender',
+      inputs: ['value', 'trigger'],
+      outputs: [],
       params: {
-        x1: { default: 0.25, min: 0, max: 1 },
-        y1: { default: 0.5, min: 0, max: 1 },
-        x2: { default: 0.75, min: 0, max: 1 },
-        y2: { default: 0.5, min: 0, max: 1 },
-        stroke: { default: '#ffffff' },
-        strokeWeight: { default: 2, min: 0, max: 20 }
+        mode: { default: 'cc', options: ['cc', 'note'] },
+        // CC mode
+        cc: { default: 1, min: 0, max: 127 },
+        // Note mode
+        note: { default: 60, min: 0, max: 127 },
+        velocity: { default: 100, min: 0, max: 127 },
+        duration: { default: 100, min: 10, max: 5000 },
+        // Common
+        channel: { default: 1, min: 1, max: 16 }
       }
     },
-    polygon: {
-      name: 'Polygon',
-      category: 'visual',
-      inputs: ['x', 'y', 'radius', 'color', 'rotation'],
-      outputs: ['draw'],
+    osc: {
+      name: 'OSC',
+      category: 'sender',
+      inputs: ['value'],
+      outputs: [],
       params: {
-        x: { default: 0.5, min: 0, max: 1 },
-        y: { default: 0.5, min: 0, max: 1 },
-        radius: { default: 0.1, min: 0, max: 0.5 },
-        sides: { default: 6, min: 3, max: 12 },
-        rotation: { default: 0, min: 0, max: 360 },
-        fill: { default: '#ffffff' },
-        stroke: { default: 'none' },
-        strokeWeight: { default: 2, min: 0, max: 20 }
+        address: { default: '/headwave/value', type: 'text', placeholder: '/osc/address' },
+        ip: { default: '127.0.0.1', type: 'text', placeholder: '127.0.0.1' },
+        port: { default: 9000, min: 1024, max: 65535 },
+        scale: { default: 1, min: 0.01, max: 100 }
       }
     },
-    text: {
-      name: 'Text',
-      category: 'visual',
-      inputs: ['x', 'y', 'color', 'size'],
-      outputs: ['draw'],
+
+    // ============ VISUALIZERS ============
+    eegViz: {
+      name: 'EEG Viz',
+      category: 'visualizer',
+      inputs: ['eegSignal'],
+      outputs: [],
       params: {
-        text: { default: 'Hello' },
-        x: { default: 0.5, min: 0, max: 1 },
-        y: { default: 0.5, min: 0, max: 1 },
-        size: { default: 32, min: 8, max: 200 },
-        fill: { default: '#ffffff' },
-        align: { default: 'center', options: ['left', 'center', 'right'] }
+        mode: { default: 'bands', options: ['timeseries', 'fft', 'bands'] },
+        channel: { default: 1, min: 1, max: 8 },
+        windowSec: { default: 4, min: 1, max: 10 },
+        colorScheme: { default: 'cyan', options: ['cyan', 'purple', 'green', 'rainbow'] },
+        recording: { default: false, options: [true, false] }
       }
     },
-    color: {
-      name: 'Color',
-      category: 'visual',
-      inputs: ['h', 's', 'b', 'a'],
-      outputs: ['color'],
+    cvViz: {
+      name: 'CV Viz',
+      category: 'visualizer',
+      inputs: [],
+      outputs: [],
       params: {
-        h: { default: 180, min: 0, max: 360 },
-        s: { default: 70, min: 0, max: 100 },
-        b: { default: 80, min: 0, max: 100 },
-        a: { default: 255, min: 0, max: 255 }
+        showFace: { default: true, options: [true, false] },
+        showHands: { default: true, options: [true, false] },
+        showGaze: { default: true, options: [true, false] },
+        showMeters: { default: true, options: [true, false] },
+        recording: { default: false, options: [true, false] }
       }
     },
-    transform: {
-      name: 'Transform',
-      category: 'visual',
-      inputs: ['draw', 'x', 'y', 'rotation', 'scale'],
-      outputs: ['draw'],
+
+    // ============ OUTPUT ============
+    output: {
+      name: 'Output',
+      category: 'output',
+      inputs: ['audio', 'visual'],
+      outputs: [],
       params: {
-        x: { default: 0, min: -1, max: 1 },
-        y: { default: 0, min: -1, max: 1 },
-        rotation: { default: 0, min: 0, max: 360 },
-        scale: { default: 1, min: 0.1, max: 5 }
-      }
-    },
-    particles: {
-      name: 'Particles',
-      category: 'visual',
-      inputs: ['x', 'y', 'color', 'speed', 'size'],
-      outputs: ['draw'],
-      params: {
-        x: { default: 0.5, min: 0, max: 1 },
-        y: { default: 0.5, min: 0, max: 1 },
-        count: { default: 50, min: 1, max: 500 },
-        size: { default: 5, min: 1, max: 50 },
-        speed: { default: 1, min: 0, max: 5 },
-        spread: { default: 0.2, min: 0, max: 1 },
-        fill: { default: '#ffffff' },
-        lifetime: { default: 2, min: 0.1, max: 10 }
+        audioGain: { default: 0.5, min: 0, max: 1 },
+        visualEnabled: { default: true, options: [true, false] }
       }
     }
   },
+
+  // Store for AI Canvas instances (isolated p5.js)
+  aiCanvasInstances: {},
+  aiCanvasCode: {},
 
   // Initialize the audio engine
   init: function() {
@@ -440,12 +331,58 @@ const AudioEngine = {
     }
   },
 
+  // Start the modulator update loop (for LFO and other time-based modulators)
+  _startModulatorLoop: function() {
+    if (this._modulatorLoopRunning) return;
+    this._modulatorLoopRunning = true;
+
+    const updateLoop = () => {
+      if (!this._modulatorLoopRunning) return;
+
+      // Update time-based modulators (LFO)
+      this._updateTimeBasedModulators();
+
+      requestAnimationFrame(updateLoop);
+    };
+    requestAnimationFrame(updateLoop);
+  },
+
+  // Update only time-based modulators (LFO, etc.) - called every frame
+  _updateTimeBasedModulators: function() {
+    for (const [id, node] of Object.entries(this.nodes)) {
+      // LFO
+      if (node.type === 'lfo') {
+        const rate = node.params.rate || 1;
+        const depth = node.params.depth || 1;
+        const time = this.ctx ? this.ctx.currentTime : (Date.now() / 1000);
+        const phase = (time * rate) % 1;
+
+        let value = 0;
+        const waveform = node.params.waveform || 'sine';
+        if (waveform === 'sine') {
+          value = (Math.sin(phase * Math.PI * 2) + 1) / 2;
+        } else if (waveform === 'square') {
+          value = phase < 0.5 ? 1 : 0;
+        } else if (waveform === 'sawtooth') {
+          value = phase;
+        } else if (waveform === 'triangle') {
+          value = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+        }
+        node.outputValue = value * depth;
+
+        // Apply modulation to connected nodes
+        this._applyModulation(node);
+      }
+    }
+  },
+
   // Start the audio engine (called when Enable Audio is checked)
   start: function() {
     if (!this.initialized) {
       this.init();
     }
     this.resume();
+    this._startModulatorLoop();
     this.muted = false;
     if (this.masterGain) {
       this.masterGain.gain.setValueAtTime(this.masterVolume, this.ctx.currentTime);
@@ -609,40 +546,48 @@ const AudioEngine = {
     if (!this.ctx) return null;
 
     switch (type) {
-      case 'oscillator':
-        const osc = this.ctx.createOscillator();
-        osc.type = params.type;
-        osc.frequency.value = params.frequency;
-        osc.detune.value = params.detune;
-        osc.start();
-        return osc;
-
-      case 'noise':
-        return this._createNoiseNode(params.type);
+      case 'toneGenerator':
+        // Combined oscillator + noise node
+        if (params.mode === 'noise') {
+          const noiseNode = this._createNoiseNode(params.noiseType);
+          const gainNode = this.ctx.createGain();
+          gainNode.gain.value = params.gain;
+          noiseNode.connect(gainNode);
+          gainNode._noiseSource = noiseNode;
+          gainNode._mode = 'noise';
+          return gainNode;
+        } else {
+          const osc = this.ctx.createOscillator();
+          osc.type = params.waveform;
+          osc.frequency.value = params.frequency;
+          osc.detune.value = params.detune;
+          const gainNode = this.ctx.createGain();
+          gainNode.gain.value = params.gain;
+          osc.connect(gainNode);
+          osc.start();
+          gainNode._oscillator = osc;
+          gainNode._mode = 'oscillator';
+          return gainNode;
+        }
 
       case 'sampler':
         return this._createSamplerNode(params, this.nodeCounter);
 
       case 'filter':
         const filter = this.ctx.createBiquadFilter();
-        filter.type = params.type;
+        // Map mode to Web Audio filter type
+        const filterTypeMap = { 'lpf': 'lowpass', 'hpf': 'highpass', 'bpf': 'bandpass' };
+        filter.type = filterTypeMap[params.mode] || 'lowpass';
         filter.frequency.value = params.frequency;
         filter.Q.value = params.Q;
         return filter;
 
-      case 'gain':
-        const gain = this.ctx.createGain();
-        gain.gain.value = params.gain;
-        return gain;
-
-      case 'delay':
-        const delay = this.ctx.createDelay(5);
-        delay.delayTime.value = params.time;
-        return delay;
+      case 'effects':
+        return this._createEffectsNode(params);
 
       case 'lfo':
         const lfo = this.ctx.createOscillator();
-        lfo.type = params.type;
+        lfo.type = params.waveform;
         lfo.frequency.value = params.rate;
         lfo.start();
         return lfo;
@@ -657,6 +602,107 @@ const AudioEngine = {
       default:
         return null;
     }
+  },
+
+  // Create effects node (delay, reverb, chorus)
+  _createEffectsNode: function(params) {
+    if (!this.ctx) return null;
+
+    const effectType = params.type || 'delay';
+
+    // Create dry/wet mixer
+    const inputGain = this.ctx.createGain();
+    const dryGain = this.ctx.createGain();
+    const wetGain = this.ctx.createGain();
+    const outputGain = this.ctx.createGain();
+
+    dryGain.gain.value = 1 - params.mix;
+    wetGain.gain.value = params.mix;
+
+    inputGain.connect(dryGain);
+    dryGain.connect(outputGain);
+
+    let effectNode;
+
+    if (effectType === 'delay') {
+      effectNode = this.ctx.createDelay(5);
+      effectNode.delayTime.value = params.delayTime;
+
+      // Create feedback loop
+      const feedbackGain = this.ctx.createGain();
+      feedbackGain.gain.value = params.feedback;
+
+      inputGain.connect(effectNode);
+      effectNode.connect(feedbackGain);
+      feedbackGain.connect(effectNode);
+      effectNode.connect(wetGain);
+      wetGain.connect(outputGain);
+
+      outputGain._delay = effectNode;
+      outputGain._feedback = feedbackGain;
+    } else if (effectType === 'reverb') {
+      // Create convolution reverb with generated impulse
+      const convolver = this.ctx.createConvolver();
+      convolver.buffer = this._createReverbImpulse(params.decay);
+
+      inputGain.connect(convolver);
+      convolver.connect(wetGain);
+      wetGain.connect(outputGain);
+
+      outputGain._convolver = convolver;
+    } else if (effectType === 'chorus') {
+      // Chorus using modulated delay
+      const chorusDelay = this.ctx.createDelay(0.1);
+      chorusDelay.delayTime.value = 0.03;
+
+      const lfo = this.ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = params.rate;
+
+      const lfoGain = this.ctx.createGain();
+      lfoGain.gain.value = params.depth * 0.01;
+
+      lfo.connect(lfoGain);
+      lfoGain.connect(chorusDelay.delayTime);
+      lfo.start();
+
+      inputGain.connect(chorusDelay);
+      chorusDelay.connect(wetGain);
+      wetGain.connect(outputGain);
+
+      outputGain._chorusDelay = chorusDelay;
+      outputGain._chorusLfo = lfo;
+      outputGain._chorusLfoGain = lfoGain;
+    }
+
+    outputGain._input = inputGain;
+    outputGain._dry = dryGain;
+    outputGain._wet = wetGain;
+    outputGain._effectType = effectType;
+
+    // Override connect to use input
+    const originalConnect = outputGain.connect.bind(outputGain);
+    outputGain.connectInput = function(source) {
+      source.connect(inputGain);
+    };
+
+    return outputGain;
+  },
+
+  // Create reverb impulse response
+  _createReverbImpulse: function(decay) {
+    const sampleRate = this.ctx.sampleRate;
+    const length = sampleRate * decay;
+    const impulse = this.ctx.createBuffer(2, length, sampleRate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const channelData = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        channelData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+      }
+    }
+
+    return impulse;
   },
 
   // Create sampler node (initially silent, needs sample loaded)
@@ -793,10 +839,13 @@ const AudioEngine = {
 
   // Connect two nodes
   connect: function(fromNodeId, fromOutput, toNodeId, toInput) {
+    console.log('[AudioEngine] connect called:', fromNodeId, fromOutput, '->', toNodeId, toInput);
+
     const fromNode = this.nodes[fromNodeId];
     const toNode = this.nodes[toNodeId];
 
     if (!fromNode || !toNode) {
+      console.log('[AudioEngine] connect failed: node not found', { fromNode: !!fromNode, toNode: !!toNode });
       return false;
     }
 
@@ -805,21 +854,20 @@ const AudioEngine = {
       c.fromNode === fromNodeId && c.toNode === toNodeId &&
       c.fromOutput === fromOutput && c.toInput === toInput
     );
-    if (exists) return false;
+    if (exists) {
+      console.log('[AudioEngine] connect: already exists');
+      return false;
+    }
 
-    // Make audio connection
+    // Make audio connection using the helper
     if (fromNode.audioNode && toNode.audioNode) {
       try {
-        if (toInput === 'audio') {
-          fromNode.audioNode.connect(toNode.audioNode);
-        } else if (toInput === 'frequency' && toNode.audioNode.frequency) {
-          fromNode.audioNode.connect(toNode.audioNode.frequency);
-        } else if (toInput === 'gain' && toNode.audioNode.gain) {
-          fromNode.audioNode.connect(toNode.audioNode.gain);
-        } else if (toInput === 'Q' && toNode.audioNode.Q) {
-          fromNode.audioNode.connect(toNode.audioNode.Q);
+        const target = this._getConnectionTarget(toNode, toInput);
+        if (target) {
+          fromNode.audioNode.connect(target);
         }
       } catch (e) {
+        console.log('[AudioEngine] audio connect error:', e);
         return false;
       }
     }
@@ -831,6 +879,7 @@ const AudioEngine = {
       toInput: toInput
     });
 
+    console.log('[AudioEngine] connect success, total connections:', this.connections.length);
     return true;
   },
 
@@ -880,61 +929,275 @@ const AudioEngine = {
 
     node.params[param] = value;
 
-    // Update audio node
+    // Check if this parameter change requires node recreation
+    const needsRecreation = this._paramRequiresRecreation(node.type, param, value, node);
+    if (needsRecreation) {
+      this._recreateAudioNode(nodeId);
+      return;
+    }
+
+    // Update audio node in real-time
     if (node.audioNode) {
-      switch (param) {
-        case 'frequency':
-          if (node.audioNode.frequency) {
-            node.audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'gain':
-          if (node.audioNode.gain) {
-            node.audioNode.gain.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'Q':
-          if (node.audioNode.Q) {
-            node.audioNode.Q.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'detune':
-          if (node.audioNode.detune) {
-            node.audioNode.detune.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'type':
-          if (node.audioNode.type !== undefined) {
-            node.audioNode.type = value;
-          }
-          break;
-        case 'time':
-          if (node.audioNode.delayTime) {
-            node.audioNode.delayTime.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'rate':
-          if (node.audioNode.frequency) {
-            node.audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'speed':
-          // For sampler nodes, speed is on the source
-          if (node.audioNode._source?.playbackRate) {
-            node.audioNode._source.playbackRate.setValueAtTime(value, this.ctx.currentTime);
-          } else if (node.audioNode.playbackRate) {
-            node.audioNode.playbackRate.setValueAtTime(value, this.ctx.currentTime);
-          }
-          break;
-        case 'loop':
-          // For sampler nodes, need to restart with new loop setting
-          if (node.type === 'sampler') {
-            this._startSamplerPlayback(node.id);
-          } else if (node.audioNode.loop !== undefined) {
-            node.audioNode.loop = value;
-          }
-          break;
+      this._applyParamToAudioNode(node, param, value);
+    }
+  },
+
+  // Check if a param change requires full node recreation
+  _paramRequiresRecreation: function(type, param, value, node) {
+    // toneGenerator: mode switch between oscillator/noise
+    if (type === 'toneGenerator' && param === 'mode') {
+      return true;
+    }
+    // toneGenerator: noise type change when in noise mode
+    if (type === 'toneGenerator' && param === 'noiseType' && node.params.mode === 'noise') {
+      return true;
+    }
+    // effects: effect type change
+    if (type === 'effects' && param === 'type') {
+      return true;
+    }
+    // effects: reverb decay requires recreation (new impulse response)
+    if (type === 'effects' && param === 'decay' && node.params.type === 'reverb') {
+      return true;
+    }
+    return false;
+  },
+
+  // Apply a parameter change to the audio node
+  _applyParamToAudioNode: function(node, param, value) {
+    const audioNode = node.audioNode;
+    if (!audioNode) return;
+
+    switch (param) {
+      case 'frequency':
+        if (audioNode.frequency) {
+          audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
+        }
+        // For toneGenerator, frequency is on the internal oscillator
+        if (audioNode._oscillator?.frequency) {
+          audioNode._oscillator.frequency.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'gain':
+        if (audioNode.gain) {
+          audioNode.gain.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'Q':
+        if (audioNode.Q) {
+          audioNode.Q.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'detune':
+        if (audioNode.detune) {
+          audioNode.detune.setValueAtTime(value, this.ctx.currentTime);
+        }
+        if (audioNode._oscillator?.detune) {
+          audioNode._oscillator.detune.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'waveform':
+        // For toneGenerator oscillator mode
+        if (audioNode._oscillator) {
+          audioNode._oscillator.type = value;
+        }
+        // For LFO
+        if (audioNode.type !== undefined && node.type === 'lfo') {
+          audioNode.type = value;
+        }
+        break;
+      case 'mode':
+        // Filter mode (lpf/hpf/bpf) - can change without recreation
+        if (node.type === 'filter' && audioNode.type !== undefined) {
+          const filterTypeMap = { 'lpf': 'lowpass', 'hpf': 'highpass', 'bpf': 'bandpass' };
+          audioNode.type = filterTypeMap[value] || 'lowpass';
+        }
+        break;
+      case 'delayTime':
+        if (audioNode._delay?.delayTime) {
+          audioNode._delay.delayTime.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'feedback':
+        if (audioNode._feedback?.gain) {
+          audioNode._feedback.gain.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'mix':
+        if (audioNode._dry?.gain && audioNode._wet?.gain) {
+          audioNode._dry.gain.setValueAtTime(1 - value, this.ctx.currentTime);
+          audioNode._wet.gain.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'rate':
+        if (audioNode.frequency) {
+          audioNode.frequency.setValueAtTime(value, this.ctx.currentTime);
+        }
+        // For chorus LFO
+        if (audioNode._chorusLfo?.frequency) {
+          audioNode._chorusLfo.frequency.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'depth':
+        // For chorus depth
+        if (audioNode._chorusLfoGain?.gain) {
+          audioNode._chorusLfoGain.gain.setValueAtTime(value * 0.01, this.ctx.currentTime);
+        }
+        break;
+      case 'decay':
+        // Reverb decay requires recreation
+        // Handled by _paramRequiresRecreation for now
+        break;
+      case 'speed':
+        // For sampler nodes
+        if (audioNode._source?.playbackRate) {
+          audioNode._source.playbackRate.setValueAtTime(value, this.ctx.currentTime);
+        } else if (audioNode.playbackRate) {
+          audioNode.playbackRate.setValueAtTime(value, this.ctx.currentTime);
+        }
+        break;
+      case 'loop':
+        if (node.type === 'sampler') {
+          this._startSamplerPlayback(node.id);
+        } else if (audioNode.loop !== undefined) {
+          audioNode.loop = value;
+        }
+        break;
+    }
+  },
+
+  // Recreate an audio node while preserving connections
+  _recreateAudioNode: function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node) return;
+
+    // Store current connections from the connections array
+    const incomingConnections = this.connections.filter(c => c.toNode === nodeId);
+    const outgoingConnections = this.connections.filter(c => c.fromNode === nodeId);
+
+    // Disconnect and cleanup old audio node
+    if (node.audioNode) {
+      try {
+        // Stop oscillators/sources
+        if (node.audioNode._oscillator) {
+          node.audioNode._oscillator.stop();
+          node.audioNode._oscillator.disconnect();
+        }
+        if (node.audioNode._noiseSource) {
+          node.audioNode._noiseSource.stop();
+          node.audioNode._noiseSource.disconnect();
+        }
+        if (node.audioNode._chorusLfo) {
+          node.audioNode._chorusLfo.stop();
+          node.audioNode._chorusLfo.disconnect();
+        }
+        node.audioNode.disconnect();
+      } catch (e) {
+        // Ignore disconnect errors
       }
+    }
+
+    // Create new audio node with current params
+    node.audioNode = this._createAudioNode(node.type, node.params);
+
+    // Restore incoming connections (other nodes -> this node)
+    for (const conn of incomingConnections) {
+      const fromNode = this.nodes[conn.fromNode];
+      if (fromNode?.audioNode && node.audioNode) {
+        this._connectAudioNodes(fromNode, node, conn.toInput);
+      }
+    }
+
+    // Restore outgoing connections (this node -> other nodes)
+    for (const conn of outgoingConnections) {
+      const toNode = this.nodes[conn.toNode];
+      if (node.audioNode && toNode?.audioNode) {
+        this._connectAudioNodes(node, toNode, conn.toInput);
+      }
+    }
+  },
+
+  // Helper to connect audio nodes with proper routing
+  _connectAudioNodes: function(fromNode, toNode, toInput) {
+    if (!fromNode.audioNode || !toNode.audioNode) return;
+
+    try {
+      // Get the actual target for the connection
+      const target = this._getConnectionTarget(toNode, toInput);
+      if (target) {
+        fromNode.audioNode.connect(target);
+      }
+    } catch (e) {
+      // Connection may not be valid
+    }
+  },
+
+  // Get the correct audio node/param to connect to based on input name
+  _getConnectionTarget: function(toNode, toInput) {
+    const audioNode = toNode.audioNode;
+    if (!audioNode) return null;
+
+    switch (toInput) {
+      case 'audio':
+        // For effects, connect to the input gain
+        if (audioNode._input) {
+          return audioNode._input;
+        }
+        return audioNode;
+
+      case 'frequency':
+        // For toneGenerator, frequency is on the internal oscillator
+        if (audioNode._oscillator?.frequency) {
+          return audioNode._oscillator.frequency;
+        }
+        if (audioNode.frequency) {
+          return audioNode.frequency;
+        }
+        return null;
+
+      case 'detune':
+        if (audioNode._oscillator?.detune) {
+          return audioNode._oscillator.detune;
+        }
+        if (audioNode.detune) {
+          return audioNode.detune;
+        }
+        return null;
+
+      case 'gain':
+        if (audioNode.gain) {
+          return audioNode.gain;
+        }
+        return null;
+
+      case 'Q':
+        if (audioNode.Q) {
+          return audioNode.Q;
+        }
+        return null;
+
+      case 'mix':
+        // For effects mix control
+        if (audioNode._wet?.gain) {
+          return audioNode._wet.gain;
+        }
+        return null;
+
+      case 'delayTime':
+        if (audioNode._delay?.delayTime) {
+          return audioNode._delay.delayTime;
+        }
+        return null;
+
+      case 'feedback':
+        if (audioNode._feedback?.gain) {
+          return audioNode._feedback.gain;
+        }
+        return null;
+
+      default:
+        // For modulator connections to any param, just return the node
+        return audioNode;
     }
   },
 
@@ -956,169 +1219,244 @@ const AudioEngine = {
     this._updateModulators();
   },
 
+  // Push time series data into visualization buffers
+  pushTimeSeries: function(channelData) {
+    if (!channelData || !Array.isArray(channelData)) return;
+
+    const maxPoints = this.vizData.timeSeries.maxPoints;
+
+    channelData.forEach((samples, chIndex) => {
+      if (chIndex >= this.vizData.timeSeries.channels.length) return;
+
+      const buffer = this.vizData.timeSeries.channels[chIndex];
+
+      // Add new samples
+      if (Array.isArray(samples)) {
+        buffer.push(...samples);
+      }
+
+      // Trim to max points
+      while (buffer.length > maxPoints) {
+        buffer.shift();
+      }
+    });
+  },
+
+  // Push FFT data into visualization buffers
+  pushFFT: function(freqs, psdData) {
+    if (!psdData || !Array.isArray(psdData)) return;
+
+    this.vizData.fft.freqs = freqs || [];
+
+    psdData.forEach((psd, chIndex) => {
+      if (chIndex >= this.vizData.fft.psd.length) return;
+      this.vizData.fft.psd[chIndex] = psd || [];
+    });
+  },
+
   // Update modulator nodes with current data
   _updateModulators: function() {
     // Step 1: Update all source modulators with 0-1 values
     for (const [id, node] of Object.entries(this.nodes)) {
-      if (node.type === 'eegBand') {
-        const band = node.params.band;
-        const value = this.data.bands[band] || 0;
-        node.outputValue = value / 100; // Normalize 0-100 to 0-1
-      } else if (node.type === 'cvFeature') {
-        const feature = node.params.feature;
+      const smoothing = node.params?.smoothing || 0.1;
+
+      // ============ FACE MODULATOR ============
+      if (node.type === 'face') {
+        // Multi-output face tracking modulator
+        const applySmooth = (newVal, prevVal) => {
+          if (prevVal !== undefined && smoothing > 0) {
+            return prevVal * smoothing + newVal * (1 - smoothing);
+          }
+          return newVal;
+        };
+
+        node.outputs = node.outputs || {};
+        node.outputs.mouth = applySmooth(
+          this.data.cv['mouth_openness'] || this.data.cv['mouth'] || 0,
+          node.outputs.mouth
+        );
+        node.outputs.smile = applySmooth(
+          this.data.cv['smile_curvature'] || this.data.cv['smile'] || 0,
+          node.outputs.smile
+        );
+        node.outputs.yaw = applySmooth(
+          (this.data.cv['head_yaw'] || 0) + 0.5, // Normalize -0.5 to 0.5 -> 0 to 1
+          node.outputs.yaw
+        );
+        node.outputs.roll = applySmooth(
+          this.data.cv['head_roll_relative'] || this.data.cv['roll'] || 0,
+          node.outputs.roll
+        );
+        node.outputs.brow = applySmooth(
+          this.data.cv['brow_raise'] || this.data.cv['brow'] || 0,
+          node.outputs.brow
+        );
+        // Primary output is mouth openness
+        node.outputValue = node.outputs.mouth;
+      }
+
+      // ============ HANDS MODULATOR ============
+      else if (node.type === 'hands') {
+        const leftHand = this.data.hands?.left;
+        const rightHand = this.data.hands?.right;
+
+        node.outputs = node.outputs || {};
+        node.outputs.leftX = leftHand?.detected ? (leftHand.palm_x || 0.5) : 0.5;
+        node.outputs.leftY = leftHand?.detected ? (leftHand.palm_y || 0.5) : 0.5;
+        node.outputs.leftPinch = leftHand?.detected ? (leftHand.pinch_distance || 0) : 0;
+        node.outputs.leftOpen = leftHand?.detected ? (leftHand.openness || 0) : 0;
+        node.outputs.rightX = rightHand?.detected ? (rightHand.palm_x || 0.5) : 0.5;
+        node.outputs.rightY = rightHand?.detected ? (rightHand.palm_y || 0.5) : 0.5;
+        node.outputs.rightPinch = rightHand?.detected ? (rightHand.pinch_distance || 0) : 0;
+        node.outputs.rightOpen = rightHand?.detected ? (rightHand.openness || 0) : 0;
+        // Primary output is max pinch
+        node.outputValue = Math.max(node.outputs.leftPinch, node.outputs.rightPinch);
+      }
+
+      // ============ EEG MODULATOR (unified bands/timeseries/fft) ============
+      else if (node.type === 'eeg') {
+        const mode = node.params.mode || 'bands';
         let value = 0;
 
-        // Map feature names to data sources
-        if (feature === 'gaze_x') {
-          value = (this.data.gaze.x + 1) / 2; // -1 to 1 -> 0 to 1
-        } else if (feature === 'gaze_y') {
-          value = (this.data.gaze.y + 1) / 2; // -1 to 1 -> 0 to 1
-        } else if (feature === 'gaze_confidence') {
-          value = this.data.gaze.confidence || 0;
-        } else if (feature === 'engagement') {
-          value = Math.min(this.data.engagement / 5, 1);
-        } else if (feature === 'mouth') {
-          value = this.data.cv['mouth_openness'] || this.data.cv['mouth'] || 0;
-        } else if (feature === 'yaw') {
-          value = this.data.cv['head_yaw'] || this.data.cv['yaw'] || 0;
-        } else if (feature === 'roll') {
-          value = this.data.cv['head_roll'] || this.data.cv['roll'] || 0;
-        } else if (feature === 'roll_relative') {
-          value = this.data.cv['head_roll_relative'] || this.data.cv['roll_relative'] || 0;
-        } else if (feature === 'smile') {
-          value = this.data.cv['smile_curvature'] || this.data.cv['smile'] || 0;
-        } else if (feature === 'brow') {
-          value = this.data.cv['brow_raise'] || this.data.cv['brow'] || 0;
-        } else {
-          value = this.data.cv[feature] || 0;
+        if (mode === 'bands') {
+          const band = node.params.band || 'alpha';
+          value = (this.data.bands[band] || 0) / 100;
+        } else if (mode === 'timeseries') {
+          const channel = (node.params.channel || 1) - 1;
+          const metric = node.params.metric || 'amplitude';
+          const buffer = this.vizData.timeSeries.channels[channel] || [];
+
+          if (buffer.length > 0) {
+            if (metric === 'amplitude') {
+              value = Math.abs(buffer[buffer.length - 1] || 0) / 100;
+            } else if (metric === 'rms') {
+              const recent = buffer.slice(-50);
+              const sumSq = recent.reduce((sum, s) => sum + s * s, 0);
+              value = Math.sqrt(sumSq / recent.length) / 100;
+            } else if (metric === 'peak') {
+              const recent = buffer.slice(-50);
+              value = Math.max(...recent.map(Math.abs)) / 100;
+            } else if (metric === 'mean') {
+              const recent = buffer.slice(-50);
+              value = Math.abs(recent.reduce((sum, s) => sum + s, 0) / recent.length) / 100;
+            }
+          }
+        } else if (mode === 'fft') {
+          const channel = (node.params.channel || 1) - 1;
+          const fftBin = node.params.fftBin || 10;
+          const psd = this.vizData.fft.psd[channel] || [];
+          if (psd.length > fftBin) {
+            value = Math.min(psd[fftBin] / 100, 1);
+          }
         }
 
-        // Apply smoothing
-        const smoothing = node.params.smoothing || 0.1;
+        // Clamp and smooth
+        value = Math.max(0, Math.min(1, value));
         if (node.outputValue !== undefined && smoothing > 0) {
           value = node.outputValue * smoothing + value * (1 - smoothing);
         }
-
         node.outputValue = value;
-      } else if (node.type === 'handFeature') {
-        const hand = node.params.hand;
-        const feature = node.params.feature;
+      }
+
+      // ============ EYES MODULATOR ============
+      else if (node.type === 'eyes') {
+        node.outputs = node.outputs || {};
+        node.outputs.x = (this.data.gaze.x + 1) / 2; // -1 to 1 -> 0 to 1
+        node.outputs.y = (this.data.gaze.y + 1) / 2;
+        node.outputs.confidence = this.data.gaze.confidence || 0;
+        node.outputValue = node.outputs.confidence;
+      }
+
+      // ============ LFO MODULATOR ============
+      else if (node.type === 'lfo') {
+        // LFO runs via Web Audio, just expose the current phase
+        const rate = node.params.rate || 1;
+        const depth = node.params.depth || 1;
+        const time = this.ctx ? this.ctx.currentTime : 0;
+        const phase = (time * rate) % 1;
+
         let value = 0;
-        const handData = this.data.hands[hand];
-
-        if (feature === 'detected') {
-          // Binary 0 or 1 for hand detection state
-          value = (handData && handData.detected) ? 1 : 0;
-        } else if (handData && handData.detected) {
-          if (feature === 'pinch') value = handData.pinch_distance || 0;
-          else if (feature === 'openness') value = handData.openness || 0;
-          else if (feature === 'x') value = handData.palm_x || 0.5;
-          else if (feature === 'y') value = handData.palm_y || 0.5;
-          else if (feature === 'z') value = Math.min(Math.max(handData.palm_z || 0, 0), 1);
+        const waveform = node.params.waveform || 'sine';
+        if (waveform === 'sine') {
+          value = (Math.sin(phase * Math.PI * 2) + 1) / 2;
+        } else if (waveform === 'square') {
+          value = phase < 0.5 ? 1 : 0;
+        } else if (waveform === 'sawtooth') {
+          value = phase;
+        } else if (waveform === 'triangle') {
+          value = phase < 0.5 ? phase * 2 : 2 - phase * 2;
         }
-        node.outputValue = value;
-      } else if (node.type === 'recording') {
-        // Recording node - check trigger input and control recording
-        const inputConn = this.connections.find(c => c.toNode === id && c.toPort === 'trigger');
-        let triggerValue = 0;
+        node.outputValue = value * depth;
+      }
 
+      // ============ OSC SENDER ============
+      else if (node.type === 'osc') {
+        const inputConn = this.connections.find(c => c.toNode === id && c.toInput === 'value');
         if (inputConn) {
           const sourceNode = this.nodes[inputConn.fromNode];
-          if (sourceNode && sourceNode.outputValue !== undefined) {
-            triggerValue = sourceNode.outputValue;
+          if (sourceNode) {
+            const rawValue = this._getOutputValue(sourceNode, inputConn.fromOutput);
+            const scaledValue = rawValue * (node.params.scale || 1);
+            if (Math.abs(scaledValue - (node._lastSent || 0)) > 0.001) {
+              node._lastSent = scaledValue;
+              this.sendOSC(node.params.address, scaledValue, node.params.ip, node.params.port);
+            }
           }
         }
+      }
 
-        const mode = node.params.mode || 'toggle';
-        const prevTrigger = node._prevTrigger || 0;
-        node._prevTrigger = triggerValue;
+      // ============ MIDI SENDER (unified CC/Note) ============
+      else if (node.type === 'midi') {
+        const mode = node.params.mode || 'cc';
 
-        if (mode === 'gate') {
-          // Gate mode: high = record, low = stop
-          if (triggerValue > 0.5 && !this.recording.isRecording) {
-            this.startRecording();
-          } else if (triggerValue <= 0.5 && this.recording.isRecording) {
-            this.stopRecording();
+        if (mode === 'cc') {
+          const inputConn = this.connections.find(c => c.toNode === id && c.toInput === 'value');
+          if (inputConn) {
+            const sourceNode = this.nodes[inputConn.fromNode];
+            if (sourceNode) {
+              const rawValue = this._getOutputValue(sourceNode, inputConn.fromOutput);
+              const value = Math.round(rawValue * 127);
+              const clampedValue = Math.max(0, Math.min(127, value));
+              if (clampedValue !== node._lastSent) {
+                node._lastSent = clampedValue;
+                this.sendMIDICC(node.params.cc, clampedValue, node.params.channel);
+              }
+            }
           }
-        } else {
-          // Toggle mode: rising edge toggles recording
+        } else if (mode === 'note') {
+          const triggerConn = this.connections.find(c => c.toNode === id && c.toInput === 'trigger');
+          let triggerValue = 0;
+
+          if (triggerConn) {
+            const sourceNode = this.nodes[triggerConn.fromNode];
+            if (sourceNode) {
+              triggerValue = this._getOutputValue(sourceNode, triggerConn.fromOutput);
+            }
+          }
+
+          const prevTrigger = node._prevTrigger || 0;
+          node._prevTrigger = triggerValue;
+
           if (triggerValue > 0.5 && prevTrigger <= 0.5) {
-            this.toggleRecording();
+            const velocity = Math.max(1, Math.min(127, node.params.velocity || 100));
+            this.sendMIDINote(node.params.note, velocity, node.params.channel, node.params.duration);
           }
         }
+      }
 
-        // Auto-stop check
-        const autoStop = node.params.autoStop || 0;
-        if (autoStop > 0 && this.recording.isRecording) {
-          const duration = this.getRecordingDuration();
-          if (duration >= autoStop) {
-            this.stopRecording();
-          }
-        }
-
-        // Output status (1 = recording, 0 = stopped)
-        node.outputValue = this.recording.isRecording ? 1 : 0;
-      } else if (node.type === 'oscSender') {
-        // OSC Sender - get input value and send via API
-        const inputConn = this.connections.find(c => c.toNode === id && c.toPort === 'value');
+      // ============ EEG VISUALIZER ============
+      else if (node.type === 'eegViz') {
+        // Connect to EEG modulator if linked
+        const inputConn = this.connections.find(c => c.toNode === id && c.toInput === 'eegSignal');
         if (inputConn) {
           const sourceNode = this.nodes[inputConn.fromNode];
-          if (sourceNode && sourceNode.outputValue !== undefined) {
-            const value = sourceNode.outputValue;
-            // Only send if value changed significantly
-            if (Math.abs(value - (node._lastSent || 0)) > 0.001) {
-              node._lastSent = value;
-              this.sendOSC(node.params.address, value, node.params.ip, node.params.port);
-            }
+          if (sourceNode && sourceNode.type === 'eeg') {
+            // Mirror the EEG node's mode for visualization
+            node._linkedEegMode = sourceNode.params.mode;
+            node._linkedChannel = sourceNode.params.channel;
           }
         }
-      } else if (node.type === 'midiCCSender') {
-        // MIDI CC Sender - get input value and send
-        const inputConn = this.connections.find(c => c.toNode === id && c.toPort === 'value');
-        if (inputConn) {
-          const sourceNode = this.nodes[inputConn.fromNode];
-          if (sourceNode && sourceNode.outputValue !== undefined) {
-            const value = Math.round(sourceNode.outputValue * (node.params.scale || 127));
-            const clampedValue = Math.max(0, Math.min(127, value));
-            // Only send if value changed
-            if (clampedValue !== node._lastSent) {
-              node._lastSent = clampedValue;
-              this.sendMIDICC(node.params.cc, clampedValue, node.params.channel);
-            }
-          }
-        }
-      } else if (node.type === 'midiNoteSender') {
-        // MIDI Note Sender - trigger on rising edge
-        const triggerConn = this.connections.find(c => c.toNode === id && c.toPort === 'trigger');
-        const velocityConn = this.connections.find(c => c.toNode === id && c.toPort === 'velocity');
-
-        let triggerValue = 0;
-        let velocity = 100;
-
-        if (triggerConn) {
-          const sourceNode = this.nodes[triggerConn.fromNode];
-          if (sourceNode && sourceNode.outputValue !== undefined) {
-            triggerValue = sourceNode.outputValue;
-          }
-        }
-
-        if (velocityConn) {
-          const sourceNode = this.nodes[velocityConn.fromNode];
-          if (sourceNode && sourceNode.outputValue !== undefined) {
-            velocity = Math.round(sourceNode.outputValue * 127);
-          }
-        }
-
-        const prevTrigger = node._prevTrigger || 0;
-        node._prevTrigger = triggerValue;
-
-        // Rising edge detection
-        if (triggerValue > 0.5 && prevTrigger <= 0.5) {
-          const clampedVelocity = Math.max(1, Math.min(127, velocity));
-          this.sendMIDINote(node.params.note, clampedVelocity, node.params.channel, node.params.duration);
-        }
-      } else if (node.type === 'bandsViz') {
-        // Bands Viz - output individual band values
+        // Store band values for visualization
         node.bandValues = {
           delta: (this.data.bands.delta || 0) / 100,
           theta: (this.data.bands.theta || 0) / 100,
@@ -1126,37 +1464,35 @@ const AudioEngine = {
           beta: (this.data.bands.beta || 0) / 100,
           gamma: (this.data.bands.gamma || 0) / 100
         };
-        // Output dominant band value
-        const maxBand = Object.entries(node.bandValues)
-          .reduce((max, [k, v]) => v > max[1] ? [k, v] : max, ['alpha', 0]);
-        node.outputValue = maxBand[1];
-        node.dominantBand = maxBand[0];
-      } else if (node.type === 'fftViz' || node.type === 'timeSeriesViz') {
-        // Initialize viz data buffer if needed
-        if (!this.vizData[id]) {
-          this.vizData[id] = {
-            buffer: [],
-            maxPoints: node.type === 'fftViz' ? 64 : 200
-          };
-        }
-        // Output the latest sample value (for potential chaining)
-        const channel = node.params.channel || 1;
-        node.outputValue = (this.data.bands.alpha || 0) / 100;  // Simplified output
+      }
+
+      // ============ CV VISUALIZER ============
+      else if (node.type === 'cvViz') {
+        // Store all CV values for overlay display
+        node.cvValues = {
+          mouth: this.data.cv['mouth_openness'] || this.data.cv['mouth'] || 0,
+          smile: this.data.cv['smile_curvature'] || this.data.cv['smile'] || 0,
+          yaw: this.data.cv['head_yaw'] || 0,
+          roll: this.data.cv['head_roll_relative'] || 0,
+          brow: this.data.cv['brow_raise'] || 0,
+          gazeX: this.data.gaze.x || 0,
+          gazeY: this.data.gaze.y || 0
+        };
+        node.handsData = this.data.hands;
       }
     }
 
-    // Step 2: Propagate through scale/range nodes
+    // Step 2: Propagate through scale nodes
     for (const [id, node] of Object.entries(this.nodes)) {
       if (node.type === 'scale') {
-        // Find input connection to this scale node
         const inputConn = this.connections.find(c => c.toNode === id);
         if (inputConn) {
           const sourceNode = this.nodes[inputConn.fromNode];
-          if (sourceNode && sourceNode.outputValue !== undefined) {
-            // Map 0-1 to min-max range
+          if (sourceNode) {
+            const rawValue = this._getOutputValue(sourceNode, inputConn.fromOutput);
             const min = node.params.min;
             const max = node.params.max;
-            node.outputValue = min + sourceNode.outputValue * (max - min);
+            node.outputValue = min + rawValue * (max - min);
           }
         }
       }
@@ -1164,10 +1500,18 @@ const AudioEngine = {
 
     // Step 3: Apply all modulations to targets
     for (const [id, node] of Object.entries(this.nodes)) {
-      if (node.outputValue !== undefined) {
+      if (node.outputValue !== undefined || node.outputs) {
         this._applyModulation(node);
       }
     }
+  },
+
+  // Helper to get output value from a node (supports multi-output nodes)
+  _getOutputValue: function(node, outputName) {
+    if (node.outputs && outputName && node.outputs[outputName] !== undefined) {
+      return node.outputs[outputName];
+    }
+    return node.outputValue || 0;
   },
 
   // Apply modulation from modulator nodes
@@ -1180,11 +1524,23 @@ const AudioEngine = {
 
       if (targetNode.type === 'scale') continue;
 
-      const value = modulatorNode.outputValue;
+      // Get value from the specific output port (supports multi-output nodes)
+      const value = this._getOutputValue(modulatorNode, conn.fromOutput);
       const input = conn.toInput;
       const isFromRange = modulatorNode.type === 'scale';
       const nodeType = this.nodeTypes[targetNode.type];
-      const isVisualNode = nodeType && (nodeType.category === 'visual' || nodeType.category === 'visual_output');
+      const isVisualNode = nodeType && nodeType.category === 'visual';
+      const isAICanvas = targetNode.type === 'aiCanvas';
+
+      // Handle AI Canvas dynamic parameters
+      if (isAICanvas && targetNode.aiParameters) {
+        const aiParam = targetNode.aiParameters.find(p => p.name === input);
+        if (aiParam) {
+          targetNode.params[input] = isFromRange ? value :
+            aiParam.min + value * (aiParam.max - aiParam.min);
+        }
+        continue;
+      }
 
       if (isVisualNode) {
         if (input in targetNode.params) {
@@ -1201,11 +1557,26 @@ const AudioEngine = {
 
       if (!targetNode.audioNode) continue;
 
+      // Handle toneGenerator's internal oscillator
+      if (targetNode.type === 'toneGenerator' && targetNode.audioNode._oscillator) {
+        if (input === 'frequency') {
+          const freq = isFromRange ? value : (100 + value * 2000);
+          targetNode.audioNode._oscillator.frequency?.setValueAtTime(freq, this.ctx.currentTime);
+        } else if (input === 'detune') {
+          const detune = isFromRange ? value : (value * 1200 - 600);
+          targetNode.audioNode._oscillator.detune?.setValueAtTime(detune, this.ctx.currentTime);
+        } else if (input === 'gain') {
+          const gain = isFromRange ? value : value;
+          targetNode.audioNode.gain?.setValueAtTime(Math.min(gain, 2), this.ctx.currentTime);
+        }
+        continue;
+      }
+
       if (input === 'frequency') {
         const freq = isFromRange ? value : (100 + value * 2000);
         targetNode.audioNode.frequency?.setValueAtTime(freq, this.ctx.currentTime);
       } else if (input === 'gain') {
-        const gain = isFromRange ? (value / 1000) : value;
+        const gain = isFromRange ? value : value;
         targetNode.audioNode.gain?.setValueAtTime(Math.min(gain, 2), this.ctx.currentTime);
       } else if (input === 'Q') {
         const q = isFromRange ? value : (0.5 + value * 10);
@@ -1220,6 +1591,10 @@ const AudioEngine = {
         } else if (targetNode.audioNode.playbackRate) {
           targetNode.audioNode.playbackRate.setValueAtTime(speed, this.ctx.currentTime);
         }
+      } else if (input === 'mix' && targetNode.audioNode._wet && targetNode.audioNode._dry) {
+        // Effects mix
+        targetNode.audioNode._wet.gain.setValueAtTime(value, this.ctx.currentTime);
+        targetNode.audioNode._dry.gain.setValueAtTime(1 - value, this.ctx.currentTime);
       }
     }
   },
@@ -1239,18 +1614,30 @@ const AudioEngine = {
   // Get only visual nodes connected to the canvas
   getConnectedVisualNodes: function() {
     const canvasNode = this.getCanvasNode();
-    if (!canvasNode) return [];
+    if (!canvasNode) {
+      console.log('[AudioEngine] No canvas/output node found');
+      return [];
+    }
 
-    // Find all nodes connected to canvas (trace back through 'draw' connections)
+    // Debug: log connections (throttled)
+    if (!this._lastConnLog || Date.now() - this._lastConnLog > 2000) {
+      console.log('[AudioEngine] Canvas/Output node:', canvasNode.id, canvasNode.type);
+      console.log('[AudioEngine] All connections:', this.connections);
+      this._lastConnLog = Date.now();
+    }
+
+    // Find all nodes connected to canvas/output (trace back through 'draw' or 'visual' connections)
     const connectedIds = new Set();
 
     const traceConnections = (nodeId) => {
       // Find all connections where this node is the target
       for (const conn of this.connections) {
-        if (conn.toNode === nodeId && conn.toInput === 'draw') {
+        // Check for both 'draw' (canvas) and 'visual' (output) inputs
+        if (conn.toNode === nodeId && (conn.toInput === 'draw' || conn.toInput === 'visual')) {
           const fromNode = this.nodes[conn.fromNode];
           if (fromNode) {
             const nodeType = this.nodeTypes[fromNode.type];
+            console.log('[AudioEngine] Found visual connection:', conn.fromNode, '->', conn.toNode, 'type:', fromNode.type, 'category:', nodeType?.category);
             if (nodeType && nodeType.category === 'visual') {
               connectedIds.add(conn.fromNode);
               // Recursively trace (for transform nodes that chain)
@@ -1274,14 +1661,169 @@ const AudioEngine = {
     return result;
   },
 
-  // Get canvas node if exists
+  // Get canvas/output node for visual rendering
   getCanvasNode: function() {
+    // First look for unified output node
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.type === 'output') {
+        return { id, ...node, isUnifiedOutput: true };
+      }
+    }
+    // Fallback to legacy canvas node
     for (const [id, node] of Object.entries(this.nodes)) {
       if (node.type === 'canvas') {
         return { id, ...node };
       }
     }
     return null;
+  },
+
+  // Get the output node
+  getOutputNode: function() {
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.type === 'output') {
+        return { id, ...node };
+      }
+    }
+    return null;
+  },
+
+  // ============ AI CANVAS METHODS ============
+
+  // Generate p5.js code from a text prompt
+  generateAICanvas: async function(nodeId, prompt) {
+    const node = this.nodes[nodeId];
+    if (!node || node.type !== 'aiCanvas') return null;
+
+    try {
+      const response = await fetch('/api/ai/generate-visual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate visual');
+      }
+
+      const result = await response.json();
+
+      if (result.code) {
+        // Store the generated code
+        node.aiCode = result.code;
+        node.aiPrompt = prompt;
+
+        // Extract parameters
+        const params = await this.extractAIParameters(nodeId, result.code);
+        node.aiParameters = params || [];
+
+        // Add dynamic inputs based on extracted parameters
+        node.aiParameters.forEach(param => {
+          node.params[param.name] = param.default;
+        });
+
+        return { status: 'ok', code: result.code, parameters: node.aiParameters };
+      } else if (result.message) {
+        return { status: 'error', message: result.message };
+      }
+    } catch (err) {
+      console.error('AI Canvas generation error:', err);
+      return { status: 'error', message: err.message };
+    }
+    return { status: 'error', message: 'Unknown error' };
+  },
+
+  // Extract controllable parameters from p5.js code
+  extractAIParameters: async function(nodeId, code) {
+    try {
+      const response = await fetch('/api/ai/extract-parameters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to extract parameters');
+      }
+
+      const result = await response.json();
+      return result.parameters || [];
+    } catch (err) {
+      console.error('Parameter extraction error:', err);
+    }
+    return [];
+  },
+
+  // Execute AI Canvas in a container element
+  executeAICanvas: function(nodeId, containerElement) {
+    const node = this.nodes[nodeId];
+    if (!node || !node.aiCode) return null;
+
+    // Clean up existing instance
+    if (this.aiCanvasInstances[nodeId]) {
+      this.aiCanvasInstances[nodeId].remove();
+      delete this.aiCanvasInstances[nodeId];
+    }
+
+    const self = this;
+
+    // Create wrapper that injects parameter access
+    const wrappedSketch = function(p) {
+      // Inject getParam function for dynamic parameter access
+      p.getParam = function(name) {
+        const n = self.nodes[nodeId];
+        if (n && n.params && name in n.params) {
+          return n.params[name];
+        }
+        // Check AI parameters for defaults
+        if (n && n.aiParameters) {
+          const aiParam = n.aiParameters.find(ap => ap.name === name);
+          if (aiParam) return aiParam.default;
+        }
+        return 0;
+      };
+
+      // Execute the user's generated code
+      try {
+        const userSketch = new Function('p', `
+          return (${node.aiCode})(p);
+        `);
+        userSketch(p);
+      } catch (err) {
+        console.error('AI Canvas execution error:', err);
+        // Fallback to error display
+        p.setup = function() {
+          p.createCanvas(containerElement.offsetWidth || 400, containerElement.offsetHeight || 300);
+          p.background(20);
+          p.fill(255, 100, 100);
+          p.textAlign(p.CENTER);
+          p.text('Error in generated code', p.width/2, p.height/2);
+        };
+      }
+    };
+
+    // Create p5 instance
+    this.aiCanvasInstances[nodeId] = new p5(wrappedSketch, containerElement);
+    return this.aiCanvasInstances[nodeId];
+  },
+
+  // Stop and remove AI Canvas instance
+  stopAICanvas: function(nodeId) {
+    if (this.aiCanvasInstances[nodeId]) {
+      this.aiCanvasInstances[nodeId].remove();
+      delete this.aiCanvasInstances[nodeId];
+    }
+  },
+
+  // Get all AI Canvas nodes
+  getAICanvasNodes: function() {
+    const result = [];
+    for (const [id, node] of Object.entries(this.nodes)) {
+      if (node.type === 'aiCanvas') {
+        result.push({ id, ...node });
+      }
+    }
+    return result;
   },
 
   // Get analyzer data for visualization

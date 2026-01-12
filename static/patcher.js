@@ -362,12 +362,34 @@ const Patcher = {
 
   // Get node dimensions based on type
   getNodeDimensions: function(node) {
-    const isCanvasNode = node.type === 'canvas';
-    const isVizNode = node.type === 'fftViz' || node.type === 'timeSeriesViz' || node.type === 'bandsViz';
-    if (isCanvasNode) {
+    // AI Canvas - width based on number of inputs
+    if (node.type === 'aiCanvas') {
+      const numInputs = (node.inputs || []).length;
+      // Each input needs ~70px for label, minimum 200px
+      const width = Math.max(200, numInputs * 70);
+      return { width: width, height: 140 };
+    } else if (node.type === 'output') {
+      return { width: 280, height: 200 };
+    } else if (node.type === 'eegViz' || node.type === 'cvViz') {
+      return { width: 200, height: 160 };
+    } else if (node.type === 'canvas') {
       return { width: this.canvasNodeWidth, height: this.canvasNodeHeight };
-    } else if (isVizNode) {
-      return { width: 200, height: 140 };  // Larger for chart preview
+    }
+    // For nodes with many outputs (like Face, Hands), expand width
+    const numOutputs = (node.outputs || []).length;
+    if (numOutputs > 4) {
+      return { width: Math.max(this.nodeWidth, numOutputs * 50), height: this.nodeHeight };
+    }
+    // Legacy node types (for backward compatibility)
+    const isEEGVizNode = node.type === 'fftViz' || node.type === 'timeSeriesViz' || node.type === 'bandsViz';
+    const isCVVizNode = node.type === 'faceViz' || node.type === 'handsViz';
+    const isGazeVizNode = node.type === 'gazeViz';
+    if (isEEGVizNode) {
+      return { width: 200, height: 160 };
+    } else if (isCVVizNode) {
+      return { width: 180, height: 140 };
+    } else if (isGazeVizNode) {
+      return { width: 140, height: 140 };
     }
     return { width: this.nodeWidth, height: this.nodeHeight };
   },
@@ -631,8 +653,8 @@ const Patcher = {
     const pos = this.getMousePos(e);
     const node = this.getNodeAt(pos.x, pos.y);
     if (node) {
-      // For canvas nodes, double-click opens fullscreen visual
-      if (node.type === 'canvas') {
+      // For canvas and output nodes, double-click opens fullscreen visual
+      if (node.type === 'canvas' || node.type === 'output') {
         if (typeof VisualRenderer !== 'undefined') {
           VisualRenderer.enterFullscreen();
         }
@@ -688,59 +710,49 @@ const Patcher = {
         'Audio': {
           icon: '♪', color: this.theme.accent.source,
           items: [
-            { type: 'oscillator', icon: '〜', desc: 'Sine/Saw/Square' },
-            { type: 'noise', icon: '⁂', desc: 'White/Pink noise' },
+            { type: 'toneGenerator', icon: '〜', desc: 'Oscillator + Noise' },
             { type: 'sampler', icon: '▶', desc: 'Sample player' },
-            { type: 'filter', icon: '◇', desc: 'LP/HP/BP filter' },
-            { type: 'gain', icon: '▲', desc: 'Volume' },
-            { type: 'delay', icon: '◌', desc: 'Echo' }
+            { type: 'filter', icon: '◇', desc: 'LPF/HPF/BPF' },
+            { type: 'effects', icon: '◌', desc: 'Delay/Reverb/Chorus' }
           ]
         },
         'Modulators': {
           icon: '◉', color: this.theme.accent.modulator,
           items: [
+            { type: 'face', icon: '◎', desc: 'Face tracking CV' },
+            { type: 'hands', icon: '✋', desc: 'Hand tracking CV' },
+            { type: 'eeg', icon: '◉', desc: 'EEG (bands/time/fft)' },
+            { type: 'eyes', icon: '⊙', desc: 'Gaze tracking' },
             { type: 'lfo', icon: '∿', desc: 'Low freq oscillator' },
-            { type: 'eegBand', icon: '◉', desc: 'EEG band power' },
-            { type: 'cvFeature', icon: '◎', desc: 'Face features' },
-            { type: 'handFeature', icon: '✋', desc: 'Hand tracking' },
             { type: 'scale', icon: '↔', desc: 'Map range' }
           ]
         },
-        'Visual': {
+        'Visuals': {
           icon: '●', color: this.theme.accent.visual,
           items: [
+            { type: 'aiCanvas', icon: '✨', desc: 'AI-generated visual' },
             { type: 'ellipse', icon: '●', desc: 'Ellipse' },
-            { type: 'rect', icon: '■', desc: 'Rectangle' },
-            { type: 'polygon', icon: '⬡', desc: 'Polygon' },
-            { type: 'line', icon: '╱', desc: 'Line' },
-            { type: 'text', icon: 'A', desc: 'Text' },
-            { type: 'particles', icon: '✧', desc: 'Particles' },
-            { type: 'color', icon: '◐', desc: 'Color' },
-            { type: 'transform', icon: '⟳', desc: 'Transform' }
-          ]
-        },
-        'Output': {
-          icon: '◈', color: this.theme.accent.output,
-          items: [
-            { type: 'output', icon: '◈', desc: 'Audio output' },
-            { type: 'canvas', icon: '▣', desc: 'Visual output' },
-            { type: 'recording', icon: '⏺', desc: 'Session recorder' }
+            { type: 'rect', icon: '■', desc: 'Rectangle' }
           ]
         },
         'Senders': {
           icon: '↗', color: this.theme.accent.sender,
           items: [
-            { type: 'oscSender', icon: '○', desc: 'Send OSC' },
-            { type: 'midiCCSender', icon: '♪', desc: 'Send MIDI CC' },
-            { type: 'midiNoteSender', icon: '♫', desc: 'Send MIDI Note' }
+            { type: 'midi', icon: '♪', desc: 'MIDI CC/Note' },
+            { type: 'osc', icon: '○', desc: 'OSC sender' }
           ]
         },
-        'Visualization': {
+        'Visualizers': {
           icon: '◐', color: this.theme.accent.visualization,
           items: [
-            { type: 'fftViz', icon: '▁▃▅▇', desc: 'FFT spectrum' },
-            { type: 'timeSeriesViz', icon: '〜', desc: 'Time series' },
-            { type: 'bandsViz', icon: '▥', desc: 'Band powers' }
+            { type: 'eegViz', icon: '▥', desc: 'EEG visualizer' },
+            { type: 'cvViz', icon: '◎', desc: 'Camera + CV overlay' }
+          ]
+        },
+        'Output': {
+          icon: '◈', color: this.theme.accent.output,
+          items: [
+            { type: 'output', icon: '◈', desc: 'Audio + Visual output' }
           ]
         }
       };
@@ -869,6 +881,71 @@ const Patcher = {
   },
 
   // Parameters dialog
+  // Define which params are visible based on mode settings
+  getVisibleParams: function(nodeType, type, params) {
+    const allParams = Object.keys(nodeType.params);
+
+    // ToneGenerator: show different params based on mode
+    if (type === 'toneGenerator') {
+      if (params.mode === 'oscillator') {
+        return allParams.filter(p => !['noiseType'].includes(p));
+      } else {
+        return allParams.filter(p => !['waveform', 'frequency', 'detune'].includes(p));
+      }
+    }
+
+    // EEG: show different params based on mode
+    if (type === 'eeg') {
+      const base = ['mode', 'smoothing'];
+      if (params.mode === 'bands') {
+        return [...base, 'band'];
+      } else if (params.mode === 'timeseries') {
+        return [...base, 'channel', 'metric'];
+      } else if (params.mode === 'fft') {
+        return [...base, 'channel', 'fftBin'];
+      }
+      return base;
+    }
+
+    // Effects: show different params based on type
+    if (type === 'effects') {
+      const base = ['type', 'mix'];
+      if (params.type === 'delay') {
+        return [...base, 'delayTime', 'feedback'];
+      } else if (params.type === 'reverb') {
+        return [...base, 'decay'];
+      } else if (params.type === 'chorus') {
+        return [...base, 'rate', 'depth'];
+      }
+      return base;
+    }
+
+    // MIDI: show different params based on mode
+    if (type === 'midi') {
+      const base = ['mode', 'channel'];
+      if (params.mode === 'cc') {
+        return [...base, 'cc', 'scale'];
+      } else {
+        return [...base, 'note', 'velocity', 'duration'];
+      }
+    }
+
+    // EEGViz: show params based on mode
+    if (type === 'eegViz') {
+      const base = ['mode', 'recording'];
+      if (params.mode === 'timeseries') {
+        return [...base, 'channel', 'windowSec', 'scale'];
+      } else if (params.mode === 'fft') {
+        return [...base, 'channel', 'colorScheme'];
+      } else if (params.mode === 'bands') {
+        return [...base, 'displayMode'];
+      }
+      return base;
+    }
+
+    return allParams;
+  },
+
   showParamsDialog: function(node) {
     const nodeType = AudioEngine.nodeTypes[node.type];
     if (!nodeType?.params && node.type !== 'sampler') return;
@@ -885,117 +962,260 @@ const Patcher = {
     `;
 
     const accentColor = this.theme.accent[node.category] || this.theme.accent.processor;
-    let html = `
-      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid ${this.theme.node.border};">
-        <div style="width: 8px; height: 8px; border-radius: 50%; background: ${accentColor};"></div>
-        <h3 style="margin: 0; color: ${this.theme.text.primary}; font-size: 16px; font-weight: 600;">${node.name}</h3>
-      </div>
-    `;
 
-    // Add file upload for sampler nodes
-    if (node.type === 'sampler') {
-      const hasFile = AudioEngine.sampleBuffers[node.id];
-      html += `
-        <div style="margin-bottom: 14px;">
-          <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Audio File</label>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="file" id="sampler-file-${node.id}" accept="audio/*" style="display: none;">
-            <button id="sampler-upload-btn-${node.id}" style="flex: 1; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 13px;">
-              ${hasFile ? '✓ Sample Loaded - Click to Change' : 'Choose Audio File...'}
-            </button>
-          </div>
-          <div id="sampler-filename-${node.id}" style="margin-top: 6px; font-size: 11px; color: ${this.theme.text.muted};"></div>
+    const buildParamsHTML = () => {
+      const visibleParams = this.getVisibleParams(nodeType, node.type, node.params);
+      let html = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid ${this.theme.node.border};">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: ${accentColor};"></div>
+          <h3 style="margin: 0; color: ${this.theme.text.primary}; font-size: 16px; font-weight: 600;">${node.name}</h3>
         </div>
       `;
-    }
 
-    for (const [param, config] of Object.entries(nodeType.params)) {
-      const value = node.params[param];
-
-      if (config.options) {
+      // Add file upload for sampler nodes
+      if (node.type === 'sampler') {
+        const hasFile = AudioEngine.sampleBuffers[node.id];
         html += `
           <div style="margin-bottom: 14px;">
-            <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${param}</label>
-            <select data-param="${param}" style="width: 100%; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-size: 14px; cursor: pointer;">
-              ${config.options.map(opt => `<option value="${opt}" ${opt === value ? 'selected' : ''}>${opt}</option>`).join('')}
-            </select>
-          </div>
-        `;
-      } else {
-        html += `
-          <div style="margin-bottom: 14px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-              <label style="color: ${this.theme.text.secondary}; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">${param}</label>
-              <span id="val-${param}" style="color: ${accentColor}; font-size: 12px; font-weight: 600;">${typeof value === 'number' ? value.toFixed(2) : value}</span>
+            <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Audio File</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="file" id="sampler-file-${node.id}" accept="audio/*" style="display: none;">
+              <button id="sampler-upload-btn-${node.id}" style="flex: 1; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                ${hasFile ? '✓ Sample Loaded - Click to Change' : 'Choose Audio File...'}
+              </button>
             </div>
-            <input type="range" data-param="${param}" min="${config.min}" max="${config.max}" step="${(config.max - config.min) / 100}" value="${value}"
-              style="width: 100%; height: 6px; border-radius: 3px; appearance: none; background: ${this.theme.bg.primary}; cursor: pointer;">
+            <div id="sampler-filename-${node.id}" style="margin-top: 6px; font-size: 11px; color: ${this.theme.text.muted};"></div>
           </div>
         `;
       }
-    }
 
-    html += `
-      <div style="display: flex; gap: 10px; margin-top: 20px;">
-        <button class="dialog-close" style="flex: 1; padding: 10px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 14px;">Close</button>
-      </div>
-    `;
+      for (const [param, config] of Object.entries(nodeType.params)) {
+        if (!visibleParams.includes(param)) continue;
 
-    dialog.innerHTML = html;
-    document.body.appendChild(dialog);
+        const value = node.params[param];
+        const displayName = param.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
 
-    // Style range inputs
-    dialog.querySelectorAll('input[type="range"]').forEach(range => {
-      range.style.cssText += `
-        --webkit-slider-thumb { appearance: none; width: 16px; height: 16px; border-radius: 50%; background: ${accentColor}; cursor: pointer; }
+        // Dropdown for options
+        if (config.options) {
+          html += `
+            <div style="margin-bottom: 14px;" data-param-container="${param}">
+              <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}</label>
+              <select data-param="${param}" style="width: 100%; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-size: 14px; cursor: pointer;">
+                ${config.options.map(opt => `<option value="${opt}" ${opt === value ? 'selected' : ''}>${opt}</option>`).join('')}
+              </select>
+            </div>
+          `;
+        }
+        // Text input
+        else if (config.type === 'text') {
+          html += `
+            <div style="margin-bottom: 14px;" data-param-container="${param}">
+              <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}</label>
+              <input type="text" data-param="${param}" value="${value || ''}" placeholder="${config.placeholder || ''}"
+                style="width: 100%; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+          `;
+        }
+        // Color picker
+        else if (config.type === 'color') {
+          html += `
+            <div style="margin-bottom: 14px;" data-param-container="${param}">
+              <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="color" data-param="${param}" value="${value && value !== 'none' ? value : '#ffffff'}"
+                  style="width: 50px; height: 36px; padding: 0; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; background: transparent;">
+                <input type="text" data-param="${param}-text" value="${value || ''}" placeholder="#ffffff or none"
+                  style="flex: 1; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+              </div>
+            </div>
+          `;
+        }
+        // Numeric slider (default)
+        else if (config.min !== undefined && config.max !== undefined) {
+          html += `
+            <div style="margin-bottom: 14px;" data-param-container="${param}">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <label style="color: ${this.theme.text.secondary}; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}</label>
+                <span id="val-${param}" style="color: ${accentColor}; font-size: 12px; font-weight: 600;">${typeof value === 'number' ? value.toFixed(2) : value}</span>
+              </div>
+              <input type="range" data-param="${param}" min="${config.min}" max="${config.max}" step="${(config.max - config.min) / 100}" value="${value}"
+                style="width: 100%; height: 6px; border-radius: 3px; appearance: none; background: ${this.theme.bg.primary}; cursor: pointer;">
+            </div>
+          `;
+        }
+      }
+
+      // Add Generate button for AI Canvas
+      if (node.type === 'aiCanvas') {
+        html += `
+          <div style="margin-bottom: 14px;">
+            <button id="generate-ai-btn" style="width: 100%; padding: 12px; background: ${accentColor}; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;">
+              Generate Visual
+            </button>
+            <div id="generate-status" style="margin-top: 8px; font-size: 12px; color: ${this.theme.text.muted}; text-align: center;"></div>
+          </div>
+        `;
+      }
+
+      html += `
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+          <button class="dialog-close" style="flex: 1; padding: 10px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 14px;">Close</button>
+        </div>
       `;
-    });
 
-    // Handle changes
-    dialog.querySelectorAll('input, select').forEach(el => {
-      el.addEventListener('input', (e) => {
-        const param = e.target.dataset.param;
-        let value = e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value;
-        node.params[param] = value;
-        AudioEngine.setParam(node.id, param, value);
-        const valEl = document.getElementById(`val-${param}`);
-        if (valEl) valEl.textContent = typeof value === 'number' ? value.toFixed(2) : value;
+      return html;
+    };
+
+    const self = this;
+
+    const rebuildDialog = () => {
+      dialog.innerHTML = buildParamsHTML();
+
+      // Style range inputs
+      dialog.querySelectorAll('input[type="range"]').forEach(range => {
+        range.style.cssText += `
+          --webkit-slider-thumb { appearance: none; width: 16px; height: 16px; border-radius: 50%; background: ${accentColor}; cursor: pointer; }
+        `;
       });
-    });
 
-    dialog.querySelector('.dialog-close').addEventListener('click', () => dialog.remove());
+      // Handle changes for standard inputs
+      dialog.querySelectorAll('input[data-param], select[data-param]').forEach(el => {
+        const param = el.dataset.param;
 
-    // Handle sampler file upload
-    if (node.type === 'sampler') {
-      const fileInput = dialog.querySelector(`#sampler-file-${node.id}`);
-      const uploadBtn = dialog.querySelector(`#sampler-upload-btn-${node.id}`);
-      const filenameDiv = dialog.querySelector(`#sampler-filename-${node.id}`);
+        // Skip color text inputs (handled separately)
+        if (param.endsWith('-text')) return;
 
-      if (uploadBtn && fileInput) {
-        uploadBtn.addEventListener('click', () => fileInput.click());
+        el.addEventListener('input', (e) => {
+          let value = e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value;
+          // Handle boolean options
+          if (value === 'true') value = true;
+          if (value === 'false') value = false;
 
-        fileInput.addEventListener('change', async (e) => {
-          const file = e.target.files[0];
-          if (!file) return;
+          node.params[param] = value;
+          AudioEngine.setParam(node.id, param, value);
 
-          uploadBtn.textContent = 'Loading...';
-          uploadBtn.disabled = true;
+          const valEl = document.getElementById(`val-${param}`);
+          if (valEl) valEl.textContent = typeof value === 'number' ? value.toFixed(2) : value;
 
-          try {
-            await AudioEngine.loadSampleForNode(node.id, file);
-            uploadBtn.textContent = '✓ ' + file.name;
-            uploadBtn.style.borderColor = '#22c55e';
-            filenameDiv.textContent = `Duration: ${(AudioEngine.sampleBuffers[node.id].duration).toFixed(2)}s`;
-          } catch (err) {
-            uploadBtn.textContent = 'Error - Try Again';
-            uploadBtn.style.borderColor = '#f85149';
-            filenameDiv.textContent = err.message;
+          // Sync color picker with text input
+          if (e.target.type === 'color') {
+            const textInput = dialog.querySelector(`[data-param="${param}-text"]`);
+            if (textInput) textInput.value = value;
           }
 
-          uploadBtn.disabled = false;
+          // If this is a mode/type change, rebuild the dialog to show relevant params
+          if (['mode', 'type'].includes(param)) {
+            rebuildDialog();
+          }
         });
+      });
+
+      // Handle color text inputs separately
+      dialog.querySelectorAll('input[data-param$="-text"]').forEach(el => {
+        el.addEventListener('input', (e) => {
+          const param = e.target.dataset.param.replace('-text', '');
+          const value = e.target.value;
+          node.params[param] = value;
+          AudioEngine.setParam(node.id, param, value);
+
+          // Sync with color picker if valid hex
+          const colorInput = dialog.querySelector(`input[type="color"][data-param="${param}"]`);
+          if (colorInput && /^#[0-9A-Fa-f]{6}$/.test(value)) {
+            colorInput.value = value;
+          }
+        });
+      });
+
+      dialog.querySelector('.dialog-close').addEventListener('click', () => dialog.remove());
+
+      // Handle AI Canvas generate button
+      if (node.type === 'aiCanvas') {
+        const generateBtn = dialog.querySelector('#generate-ai-btn');
+        const statusDiv = dialog.querySelector('#generate-status');
+
+        if (generateBtn) {
+          generateBtn.addEventListener('click', async () => {
+            const prompt = node.params.prompt;
+            if (!prompt || !prompt.trim()) {
+              statusDiv.textContent = 'Please enter a prompt first';
+              statusDiv.style.color = '#f85149';
+              return;
+            }
+
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating...';
+            statusDiv.textContent = 'Creating your visual with AI...';
+            statusDiv.style.color = self.theme.text.muted;
+
+            try {
+              const result = await AudioEngine.generateAICanvas(node.id, prompt);
+              if (result.status === 'ok') {
+                // Update patcher node's inputs with the extracted parameters
+                const paramNames = (result.parameters || []).map(p => p.name);
+                node.inputs = paramNames;
+
+                // Also update the node's params with defaults
+                for (const param of result.parameters || []) {
+                  if (!(param.name in node.params)) {
+                    node.params[param.name] = param.default;
+                  }
+                }
+
+                statusDiv.textContent = `Generated with ${paramNames.length} controllable params!`;
+                statusDiv.style.color = '#22c55e';
+                generateBtn.textContent = 'Regenerate';
+
+                // Close dialog and redraw to show new inputs
+                setTimeout(() => dialog.remove(), 1500);
+              } else {
+                throw new Error(result.message || 'Generation failed');
+              }
+            } catch (err) {
+              statusDiv.textContent = 'Error: ' + err.message;
+              statusDiv.style.color = '#f85149';
+              generateBtn.textContent = 'Try Again';
+            }
+
+            generateBtn.disabled = false;
+          });
+        }
       }
-    }
+
+      // Handle sampler file upload
+      if (node.type === 'sampler') {
+        const fileInput = dialog.querySelector(`#sampler-file-${node.id}`);
+        const uploadBtn = dialog.querySelector(`#sampler-upload-btn-${node.id}`);
+        const filenameDiv = dialog.querySelector(`#sampler-filename-${node.id}`);
+
+        if (uploadBtn && fileInput) {
+          uploadBtn.addEventListener('click', () => fileInput.click());
+
+          fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            uploadBtn.textContent = 'Loading...';
+            uploadBtn.disabled = true;
+
+            try {
+              await AudioEngine.loadSampleForNode(node.id, file);
+              uploadBtn.textContent = '✓ ' + file.name;
+              uploadBtn.style.borderColor = '#22c55e';
+              filenameDiv.textContent = `Duration: ${(AudioEngine.sampleBuffers[node.id].duration).toFixed(2)}s`;
+            } catch (err) {
+              uploadBtn.textContent = 'Error - Try Again';
+              uploadBtn.style.borderColor = '#f85149';
+              filenameDiv.textContent = err.message;
+            }
+
+            uploadBtn.disabled = false;
+          });
+        }
+      }
+    };
+
+    document.body.appendChild(dialog);
+    rebuildDialog();
   },
 
   // Render
@@ -1101,9 +1321,17 @@ const Patcher = {
   drawNode: function(node) {
     const ctx = this.ctx;
     const { x, y } = node;
+    // Determine node size based on type
     const isCanvasNode = node.type === 'canvas';
-    const w = isCanvasNode ? this.canvasNodeWidth : this.nodeWidth;
-    const h = isCanvasNode ? this.canvasNodeHeight : this.nodeHeight;
+    const isAICanvas = node.type === 'aiCanvas';
+    const isUnifiedOutput = node.type === 'output';
+    const isVisualizer = node.type === 'eegViz' || node.type === 'cvViz';
+
+    // Get dimensions from getNodeDimensions for consistency
+    const dim = this.getNodeDimensions(node);
+    let w = dim.width;
+    let h = dim.height;
+
     const r = this.cornerRadius;
     const hh = this.headerHeight;
     const isSelected = node.id === this.selectedNode || this.selectedNodes.has(node.id);
@@ -1199,6 +1427,257 @@ const Patcher = {
       ctx.fillText('Double-click for fullscreen', x + w/2, y + h - 14);
       ctx.textAlign = 'left';
     }
+    // AI Canvas node - special rendering with prompt and preview
+    else if (isAICanvas) {
+      const previewX = x + 8;
+      const previewY = y + hh + 8;
+      const previewW = w - 16;
+      const previewH = h - hh - 16;
+
+      // Draw preview background
+      ctx.fillStyle = node.params.background || '#0d1117';
+      ctx.beginPath();
+      ctx.roundRect(previewX, previewY, previewW, previewH, 6);
+      ctx.fill();
+
+      // Check if AI code is generated
+      const audioNode = AudioEngine.nodes[node.id];
+      if (audioNode?.aiCode) {
+        // Show active indicator
+        ctx.fillStyle = '#22c55e';
+        ctx.font = 'bold 12px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('✓ Visual Generated', x + w/2, previewY + previewH/2 - 10);
+
+        // Show prompt
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.font = '10px -apple-system, system-ui, sans-serif';
+        const prompt = node.params.prompt || '';
+        const truncPrompt = prompt.length > 25 ? prompt.slice(0, 22) + '...' : prompt;
+        ctx.fillText(`"${truncPrompt}"`, x + w/2, previewY + previewH/2 + 8);
+
+        // Show param count
+        const paramCount = audioNode.aiParameters?.length || 0;
+        if (paramCount > 0) {
+          ctx.fillText(`${paramCount} params`, x + w/2, previewY + previewH/2 + 24);
+        }
+      } else {
+        // Empty state - show clear instruction
+        ctx.fillStyle = accentColor;
+        ctx.font = 'bold 12px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Double-click to configure', x + w/2, previewY + previewH/2);
+      }
+      ctx.textAlign = 'left';
+    }
+    // Unified Output node - audio + visual + recording
+    else if (isUnifiedOutput) {
+      const previewX = x + 8;
+      const previewY = y + hh + 8;
+      const previewW = w - 16;
+      const previewH = h - hh - 60;
+
+      // Draw visual preview area
+      ctx.fillStyle = '#0d1117';
+      ctx.beginPath();
+      ctx.roundRect(previewX, previewY, previewW, previewH, 6);
+      ctx.fill();
+
+      // Render visual nodes into this area
+      if (typeof VisualRenderer !== 'undefined' && node.params.visualEnabled) {
+        VisualRenderer.renderToContext(ctx, previewX, previewY, previewW, previewH);
+      }
+
+      // Audio meter area
+      const meterY = y + h - 48;
+      ctx.fillStyle = this.theme.bg.tertiary;
+      ctx.beginPath();
+      ctx.roundRect(previewX, meterY, previewW - 50, 20, 4);
+      ctx.fill();
+
+      // Draw audio level (from analyzer)
+      const analyzerData = AudioEngine.getAnalyzerData?.();
+      if (analyzerData && analyzerData.length > 0) {
+        const avgLevel = Array.from(analyzerData).reduce((a, b) => a + b, 0) / analyzerData.length / 255;
+        ctx.fillStyle = avgLevel > 0.8 ? '#ef4444' : '#22c55e';
+        ctx.beginPath();
+        ctx.roundRect(previewX + 2, meterY + 2, (previewW - 54) * avgLevel, 16, 3);
+        ctx.fill();
+      }
+
+      // Record button
+      const recX = previewX + previewW - 44;
+      const isRecording = AudioEngine.recording?.isRecording || false;
+      ctx.fillStyle = isRecording ? '#ef4444' : this.theme.bg.tertiary;
+      ctx.beginPath();
+      ctx.roundRect(recX, meterY, 44, 20, 4);
+      ctx.fill();
+
+      ctx.fillStyle = isRecording ? '#fff' : this.theme.text.secondary;
+      ctx.font = '10px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(isRecording ? 'REC' : 'REC', recX + 22, meterY + 14);
+
+      // Fullscreen hint
+      ctx.fillStyle = this.theme.text.muted;
+      ctx.font = '9px -apple-system, system-ui, sans-serif';
+      ctx.fillText('Double-click for fullscreen', x + w/2, y + h - 8);
+      ctx.textAlign = 'left';
+    }
+    // EEG Visualizer - unified bands/timeseries/fft display
+    else if (node.type === 'eegViz') {
+      const mode = node.params.mode || 'bands';
+      const chartX = x + 12;
+      const chartY = y + hh + 8;
+      const chartW = w - 24;
+      const chartH = h - hh - 32;
+
+      // Mode label
+      ctx.fillStyle = this.theme.text.muted;
+      ctx.font = '9px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(mode.toUpperCase(), chartX, chartY - 2);
+
+      // Chart background
+      ctx.fillStyle = this.theme.bg.primary;
+      ctx.beginPath();
+      ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+      ctx.fill();
+
+      if (mode === 'bands') {
+        // Draw bands visualization
+        const bands = AudioEngine.data?.bands || {};
+        const bandNames = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+        const colors = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444'];
+        const barWidth = (chartW - (bandNames.length - 1) * 4 - 8) / bandNames.length;
+
+        bandNames.forEach((band, i) => {
+          const value = (bands[band] || 0) / 100;
+          const barH = Math.max(2, value * (chartH - 16));
+          const bx = chartX + 4 + i * (barWidth + 4);
+          const by = chartY + chartH - 8 - barH;
+
+          ctx.fillStyle = colors[i];
+          ctx.beginPath();
+          ctx.roundRect(bx, by, barWidth, barH, 2);
+          ctx.fill();
+        });
+      } else if (mode === 'timeseries') {
+        // Draw time series
+        const channel = (node.params.channel || 1) - 1;
+        const buffer = AudioEngine.vizData?.timeSeries?.channels[channel] || [];
+
+        if (buffer.length > 1) {
+          ctx.strokeStyle = '#22c55e';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+
+          for (let i = 0; i < buffer.length; i++) {
+            const px = chartX + 4 + (i / (buffer.length - 1)) * (chartW - 8);
+            const sample = buffer[i] || 0;
+            const normalized = Math.max(-1, Math.min(1, sample / 100));
+            const py2 = chartY + chartH / 2 - normalized * (chartH / 2 - 8);
+            if (i === 0) ctx.moveTo(px, py2);
+            else ctx.lineTo(px, py2);
+          }
+          ctx.stroke();
+        }
+      } else if (mode === 'fft') {
+        // Draw FFT
+        const channel = (node.params.channel || 1) - 1;
+        const psd = AudioEngine.vizData?.fft?.psd[channel] || [];
+        const colorScheme = node.params.colorScheme || 'cyan';
+        const colors = { cyan: '#06b6d4', purple: '#8b5cf6', green: '#22c55e', rainbow: '#f97316' };
+
+        if (psd.length > 1) {
+          const numBars = Math.min(24, psd.length);
+          const barWidth = (chartW - 8) / numBars;
+
+          ctx.fillStyle = colors[colorScheme] || colors.cyan;
+          for (let i = 0; i < numBars; i++) {
+            const psdIndex = Math.floor(i * psd.length / numBars);
+            const value = psd[psdIndex] || 0;
+            const normalized = value > 0 ? Math.min(1, Math.log10(value + 1) / 3) : 0;
+            const barH = Math.max(1, normalized * (chartH - 12));
+            const bx = chartX + 4 + i * barWidth;
+            const by = chartY + chartH - 6 - barH;
+
+            ctx.beginPath();
+            ctx.roundRect(bx, by, barWidth - 2, barH, 1);
+            ctx.fill();
+          }
+        }
+      }
+
+      // Recording indicator
+      if (node.params.recording) {
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(x + w - 16, y + hh + 16, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // CV Visualizer - camera overlay with values
+    else if (node.type === 'cvViz') {
+      const chartX = x + 12;
+      const chartY = y + hh + 8;
+      const chartW = w - 24;
+      const chartH = h - hh - 24;
+
+      // Camera placeholder
+      ctx.fillStyle = this.theme.bg.primary;
+      ctx.beginPath();
+      ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+      ctx.fill();
+
+      // CV values overlay
+      const cv = AudioEngine.data?.cv || {};
+      const features = [
+        { label: 'Mouth', value: cv.mouth_openness || cv.mouth || 0 },
+        { label: 'Smile', value: cv.smile_curvature || cv.smile || 0 },
+        { label: 'Brow', value: cv.brow_raise || cv.brow || 0 }
+      ];
+
+      const meterH = 10;
+      const meterSpacing = (chartH - 20) / features.length;
+
+      ctx.font = '9px -apple-system, system-ui, sans-serif';
+      features.forEach((feat, i) => {
+        const my = chartY + 8 + i * meterSpacing;
+
+        // Label
+        ctx.fillStyle = this.theme.text.secondary;
+        ctx.textAlign = 'left';
+        ctx.fillText(feat.label, chartX + 4, my + meterH);
+
+        // Meter background
+        ctx.fillStyle = this.theme.bg.tertiary;
+        ctx.beginPath();
+        ctx.roundRect(chartX + 40, my, chartW - 48, meterH, 2);
+        ctx.fill();
+
+        // Meter value
+        ctx.fillStyle = '#9333ea';
+        ctx.beginPath();
+        ctx.roundRect(chartX + 40, my, (chartW - 48) * Math.min(1, feat.value), meterH, 2);
+        ctx.fill();
+      });
+
+      // Show camera hint
+      ctx.fillStyle = this.theme.text.muted;
+      ctx.font = '9px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Camera feed + CV', x + w/2, y + h - 8);
+      ctx.textAlign = 'left';
+
+      // Recording indicator
+      if (node.params.recording) {
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(x + w - 16, y + hh + 16, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     // Params preview for other nodes
     else {
       ctx.fillStyle = this.theme.text.secondary;
@@ -1258,48 +1737,47 @@ const Patcher = {
           ctx.fillText(`mode: ${node.params.mode || 'toggle'}`, x + 12, py + 4);
         }
       } else if (node.type === 'bandsViz') {
-        // Bands visualization - draw bar chart
-        const audioNode = AudioEngine.nodes[node.id];
-        const bandValues = audioNode?.bandValues || { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
-        const bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+        // Bands visualization - draw bar chart with LIVE data
+        const bands = AudioEngine.data.bands;
+        const bandNames = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
         const colors = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444'];
         const chartX = x + 12;
         const chartY = y + hh + 8;
         const chartW = w - 24;
         const chartH = h - hh - 24;
-        const barWidth = (chartW - (bands.length - 1) * 4) / bands.length;
+        const barWidth = (chartW - (bandNames.length - 1) * 4) / bandNames.length;
 
         // Chart background
-        ctx.fillStyle = this.theme.bg.primary;
+        ctx.fillStyle = this.theme.bg.secondary;
         ctx.beginPath();
         ctx.roundRect(chartX, chartY, chartW, chartH, 4);
         ctx.fill();
 
-        // Draw bars
-        bands.forEach((band, i) => {
-          const value = bandValues[band] || 0;
-          const barH = value * (chartH - 8);
-          const bx = chartX + i * (barWidth + 4);
-          const by = chartY + chartH - 4 - barH;
+        // Draw bars with live values from AudioEngine.data.bands
+        bandNames.forEach((band, i) => {
+          const value = (bands[band] || 0) / 100; // Normalize 0-100 to 0-1
+          const barH = Math.max(2, value * (chartH - 12)); // Minimum 2px height
+          const bx = chartX + 4 + i * (barWidth + 4);
+          const by = chartY + chartH - 6 - barH;
 
           ctx.fillStyle = colors[i];
           ctx.beginPath();
-          ctx.roundRect(bx, by, barWidth, barH, 2);
+          ctx.roundRect(bx, by, barWidth - 2, barH, 2);
           ctx.fill();
         });
 
         // Labels
-        ctx.font = '8px -apple-system, system-ui, sans-serif';
+        ctx.font = '9px -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = this.theme.text.muted;
-        bands.forEach((band, i) => {
-          const bx = chartX + i * (barWidth + 4) + barWidth / 2;
-          ctx.fillText(band[0].toUpperCase(), bx, chartY + chartH + 8);
+        ctx.fillStyle = this.theme.text.secondary;
+        bandNames.forEach((band, i) => {
+          const bx = chartX + 4 + i * (barWidth + 4) + (barWidth - 2) / 2;
+          ctx.fillText(band.charAt(0).toUpperCase(), bx, chartY + chartH + 10);
         });
         ctx.textAlign = 'left';
 
-      } else if (node.type === 'fftViz' || node.type === 'timeSeriesViz') {
-        // Time series / FFT visualization placeholder
+      } else if (node.type === 'timeSeriesViz') {
+        // Time series visualization with LIVE data
         const chartX = x + 12;
         const chartY = y + hh + 8;
         const chartW = w - 24;
@@ -1311,29 +1789,233 @@ const Patcher = {
         ctx.roundRect(chartX, chartY, chartW, chartH, 4);
         ctx.fill();
 
-        // Draw simulated waveform
-        ctx.strokeStyle = node.type === 'fftViz' ? '#06b6d4' : '#22c55e';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        const points = 32;
-        for (let i = 0; i < points; i++) {
-          const px = chartX + (i / (points - 1)) * chartW;
-          const phase = Date.now() / 500 + i * 0.3;
-          const amplitude = node.type === 'fftViz'
-            ? Math.abs(Math.sin(phase) * Math.exp(-i / 20))
-            : Math.sin(phase);
-          const py2 = chartY + chartH / 2 - amplitude * (chartH / 3);
-          if (i === 0) ctx.moveTo(px, py2);
-          else ctx.lineTo(px, py2);
+        // Get time series data from AudioEngine
+        const channel = (node.params.channel || 1) - 1; // 0-indexed
+        const buffer = AudioEngine.vizData.timeSeries.channels[channel] || [];
+        const scale = node.params.scale || 100;
+
+        if (buffer.length > 1) {
+          // Draw waveform from live data
+          ctx.strokeStyle = '#22c55e';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+
+          for (let i = 0; i < buffer.length; i++) {
+            const px = chartX + (i / (buffer.length - 1)) * chartW;
+            const sample = buffer[i] || 0;
+            // Normalize sample to chart height
+            const normalized = Math.max(-1, Math.min(1, sample / scale));
+            const py2 = chartY + chartH / 2 - normalized * (chartH / 2 - 4);
+            if (i === 0) ctx.moveTo(px, py2);
+            else ctx.lineTo(px, py2);
+          }
+          ctx.stroke();
+        } else {
+          // No data - show placeholder text
+          ctx.fillStyle = this.theme.text.muted;
+          ctx.font = '10px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Waiting for data...', x + w / 2, chartY + chartH / 2);
         }
+
+        // Channel label
+        ctx.font = '9px -apple-system, system-ui, sans-serif';
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.textAlign = 'left';
+        ctx.fillText(`CH${node.params.channel || 1}`, chartX + 4, chartY + 12);
+
+      } else if (node.type === 'fftViz') {
+        // FFT visualization with LIVE data
+        const chartX = x + 12;
+        const chartY = y + hh + 8;
+        const chartW = w - 24;
+        const chartH = h - hh - 24;
+
+        // Chart background
+        ctx.fillStyle = this.theme.bg.primary;
+        ctx.beginPath();
+        ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+        ctx.fill();
+
+        // Get FFT data from AudioEngine
+        const channel = (node.params.channel || 1) - 1; // 0-indexed
+        const psd = AudioEngine.vizData.fft.psd[channel] || [];
+        const colorScheme = node.params.colorScheme || 'cyan';
+        const colors = {
+          cyan: '#06b6d4',
+          purple: '#8b5cf6',
+          green: '#22c55e',
+          orange: '#f97316'
+        };
+
+        if (psd.length > 1) {
+          // Draw spectrum bars from live data
+          const numBars = Math.min(32, psd.length);
+          const barWidth = (chartW - 4) / numBars;
+
+          ctx.fillStyle = colors[colorScheme] || colors.cyan;
+
+          for (let i = 0; i < numBars; i++) {
+            const psdIndex = Math.floor(i * psd.length / numBars);
+            const value = psd[psdIndex] || 0;
+            // Normalize PSD value (log scale works better for FFT)
+            const normalized = value > 0 ? Math.min(1, Math.log10(value + 1) / 3) : 0;
+            const barH = Math.max(1, normalized * (chartH - 8));
+            const bx = chartX + 2 + i * barWidth;
+            const by = chartY + chartH - 4 - barH;
+
+            ctx.beginPath();
+            ctx.roundRect(bx, by, barWidth - 1, barH, 1);
+            ctx.fill();
+          }
+        } else {
+          // No data - show placeholder text
+          ctx.fillStyle = this.theme.text.muted;
+          ctx.font = '10px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Waiting for data...', x + w / 2, chartY + chartH / 2);
+        }
+
+        // Channel label
+        ctx.font = '9px -apple-system, system-ui, sans-serif';
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.textAlign = 'left';
+        ctx.fillText(`CH${node.params.channel || 1}`, chartX + 4, chartY + 12);
+
+      } else if (node.type === 'faceViz') {
+        // Face visualization - show CV feature meters
+        const chartX = x + 12;
+        const chartY = y + hh + 8;
+        const chartW = w - 24;
+        const chartH = h - hh - 16;
+
+        const cv = AudioEngine.data.cv;
+        const features = [
+          { name: 'mouth', label: 'Mouth', key: 'mouth' },
+          { name: 'smile', label: 'Smile', key: 'smile' },
+          { name: 'roll', label: 'Roll', key: 'roll' },
+          { name: 'brow', label: 'Brow', key: 'brow' },
+          { name: 'yaw', label: 'Yaw', key: 'yaw' }
+        ];
+
+        const meterH = 12;
+        const meterSpacing = (chartH - 4) / features.length;
+
+        features.forEach((feat, i) => {
+          const my = chartY + i * meterSpacing;
+          const value = cv[feat.key] || 0;
+
+          // Background meter
+          ctx.fillStyle = this.theme.bg.primary;
+          ctx.beginPath();
+          ctx.roundRect(chartX + 40, my, chartW - 44, meterH, 2);
+          ctx.fill();
+
+          // Value meter
+          ctx.fillStyle = '#9333ea';
+          ctx.beginPath();
+          ctx.roundRect(chartX + 40, my, (chartW - 44) * Math.min(1, value), meterH, 2);
+          ctx.fill();
+
+          // Label
+          ctx.fillStyle = this.theme.text.secondary;
+          ctx.font = '9px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText(feat.label, chartX, my + meterH - 2);
+        });
+
+      } else if (node.type === 'gazeViz') {
+        // Gaze visualization - show gaze position on grid
+        const chartX = x + 12;
+        const chartY = y + hh + 8;
+        const chartW = w - 24;
+        const chartH = h - hh - 16;
+
+        const gaze = AudioEngine.data.gaze;
+        const gazeX = (gaze.x + 1) / 2; // -1 to 1 -> 0 to 1
+        const gazeY = (gaze.y + 1) / 2;
+
+        // Grid background
+        ctx.fillStyle = this.theme.bg.primary;
+        ctx.beginPath();
+        ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+        ctx.fill();
+
+        // Crosshair
+        ctx.strokeStyle = this.theme.bg.tertiary;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(chartX, chartY + chartH / 2);
+        ctx.lineTo(chartX + chartW, chartY + chartH / 2);
+        ctx.moveTo(chartX + chartW / 2, chartY);
+        ctx.lineTo(chartX + chartW / 2, chartY + chartH);
         ctx.stroke();
 
-        // Label
-        ctx.font = '10px -apple-system, system-ui, sans-serif';
+        // Gaze dot
+        const dotX = chartX + gazeX * chartW;
+        const dotY = chartY + gazeY * chartH;
+        ctx.fillStyle = '#9333ea';
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Confidence indicator
         ctx.fillStyle = this.theme.text.muted;
+        ctx.font = '9px -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(node.type === 'fftViz' ? 'FFT Preview' : 'Time Series', x + w / 2, y + h - 8);
+        ctx.fillText(`${Math.round((gaze.confidence || 0) * 100)}%`, x + w / 2, y + h - 4);
+
+      } else if (node.type === 'handsViz') {
+        // Hands visualization - show hand detection status and pinch
+        const chartX = x + 12;
+        const chartY = y + hh + 8;
+        const chartW = w - 24;
+        const chartH = h - hh - 16;
+
+        const hands = AudioEngine.data.hands;
+        const leftHand = hands.left;
+        const rightHand = hands.right;
+
+        // Left hand section
+        const leftY = chartY;
+        const halfH = (chartH - 8) / 2;
+
+        ctx.fillStyle = (leftHand && leftHand.detected) ? '#22c55e' : this.theme.text.muted;
+        ctx.font = '10px -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'left';
+        ctx.fillText(leftHand && leftHand.detected ? 'L: Detected' : 'L: --', chartX, leftY + 12);
+
+        if (leftHand && leftHand.detected) {
+          // Pinch meter
+          ctx.fillStyle = this.theme.bg.primary;
+          ctx.beginPath();
+          ctx.roundRect(chartX, leftY + 18, chartW, 10, 2);
+          ctx.fill();
+          ctx.fillStyle = '#22c55e';
+          ctx.beginPath();
+          ctx.roundRect(chartX, leftY + 18, chartW * (leftHand.pinch_distance || 0), 10, 2);
+          ctx.fill();
+        }
+
+        // Right hand section
+        const rightY = chartY + halfH + 8;
+
+        ctx.fillStyle = (rightHand && rightHand.detected) ? '#3b82f6' : this.theme.text.muted;
+        ctx.font = '10px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(rightHand && rightHand.detected ? 'R: Detected' : 'R: --', chartX, rightY + 12);
+
+        if (rightHand && rightHand.detected) {
+          // Pinch meter
+          ctx.fillStyle = this.theme.bg.primary;
+          ctx.beginPath();
+          ctx.roundRect(chartX, rightY + 18, chartW, 10, 2);
+          ctx.fill();
+          ctx.fillStyle = '#3b82f6';
+          ctx.beginPath();
+          ctx.roundRect(chartX, rightY + 18, chartW * (rightHand.pinch_distance || 0), 10, 2);
+          ctx.fill();
+        }
 
       } else {
         const paramKeys = Object.keys(node.params).slice(0, 2);

@@ -171,6 +171,54 @@ async def api_assistant_chat(payload: dict):
     return result
 
 
+@app.post("/api/ai/generate-visual")
+async def api_generate_visual(payload: dict):
+    """Generate p5.js code from a text prompt for AI Canvas."""
+    if not ASSISTANT_AVAILABLE or assistant_service is None:
+        return JSONResponse(
+            {"status": "error", "message": "AI service unavailable"},
+            status_code=503
+        )
+
+    prompt = payload.get("prompt", "")
+    if not prompt:
+        return JSONResponse(
+            {"status": "error", "message": "No prompt provided"},
+            status_code=400
+        )
+
+    result = assistant_service.generate_visual(prompt)
+
+    if result["status"] == "error":
+        return JSONResponse(result, status_code=500)
+
+    return result
+
+
+@app.post("/api/ai/extract-parameters")
+async def api_extract_parameters(payload: dict):
+    """Extract controllable parameters from p5.js code."""
+    if not ASSISTANT_AVAILABLE or assistant_service is None:
+        return JSONResponse(
+            {"status": "error", "message": "AI service unavailable"},
+            status_code=503
+        )
+
+    code = payload.get("code", "")
+    if not code:
+        return JSONResponse(
+            {"status": "error", "message": "No code provided"},
+            status_code=400
+        )
+
+    result = assistant_service.extract_parameters(code)
+
+    if result["status"] == "error":
+        return JSONResponse(result, status_code=500)
+
+    return result
+
+
 @app.post("/api/camera/start")
 async def api_camera_start(payload: dict):
     if not CAMERA_AVAILABLE or camera_service is None:
