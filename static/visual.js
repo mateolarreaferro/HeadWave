@@ -369,11 +369,22 @@ const VisualRenderer = {
         });
 
         // Parse and execute the AI code
-        console.log('[VisualRenderer] Parsing AI code...');
-        const sketchFn = new Function('return ' + aiCode)();
-        console.log('[VisualRenderer] Got sketch function:', typeof sketchFn);
-        sketchFn(proxyP);
-        console.log('[VisualRenderer] Executed sketch function');
+        console.log('[VisualRenderer] Parsing AI code, length:', aiCode.length);
+        console.log('[VisualRenderer] Code starts with:', aiCode.substring(0, 100));
+        try {
+          const sketchFn = new Function('return ' + aiCode)();
+          console.log('[VisualRenderer] Got sketch function:', typeof sketchFn);
+          if (typeof sketchFn !== 'function') {
+            console.error('[VisualRenderer] sketchFn is not a function!');
+            throw new Error('Generated code did not return a function');
+          }
+          sketchFn(proxyP);
+          console.log('[VisualRenderer] Executed sketch function');
+        } catch (parseErr) {
+          console.error('[VisualRenderer] Parse error:', parseErr);
+          console.error('[VisualRenderer] Full code:', aiCode);
+          throw parseErr;
+        }
         console.log('[VisualRenderer] Captured setup:', !!capturedSetup.fn);
         console.log('[VisualRenderer] Captured draw:', !!capturedDraw.fn);
         console.log('[VisualRenderer] Captured mouse events:', {

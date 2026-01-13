@@ -231,6 +231,78 @@ async def api_extract_parameters(payload: dict):
     return result
 
 
+@app.post("/api/ai/validate-code")
+async def api_validate_code(payload: dict):
+    """Validate p5.js code and fix any issues."""
+    if not ASSISTANT_AVAILABLE or assistant_service is None:
+        return JSONResponse(
+            {"status": "error", "message": "AI service unavailable"},
+            status_code=503
+        )
+
+    code = payload.get("code", "")
+    if not code:
+        return JSONResponse(
+            {"status": "error", "message": "No code provided"},
+            status_code=400
+        )
+
+    result = assistant_service.validate_code(code)
+
+    if result["status"] == "error":
+        return JSONResponse(result, status_code=500)
+
+    return result
+
+
+@app.post("/api/ai/optimize-code")
+async def api_optimize_code(payload: dict):
+    """Optimize p5.js code for performance."""
+    if not ASSISTANT_AVAILABLE or assistant_service is None:
+        return JSONResponse(
+            {"status": "error", "message": "AI service unavailable"},
+            status_code=503
+        )
+
+    code = payload.get("code", "")
+    if not code:
+        return JSONResponse(
+            {"status": "error", "message": "No code provided"},
+            status_code=400
+        )
+
+    result = assistant_service.optimize_code(code)
+
+    if result["status"] == "error":
+        return JSONResponse(result, status_code=500)
+
+    return result
+
+
+@app.post("/api/ai/analyze-code")
+async def api_analyze_code(payload: dict):
+    """Run parallel multi-agent analysis: validator, optimizer, stylist + coordinator."""
+    if not ASSISTANT_AVAILABLE or assistant_service is None:
+        return JSONResponse(
+            {"status": "error", "message": "AI service unavailable"},
+            status_code=503
+        )
+
+    code = payload.get("code", "")
+    if not code:
+        return JSONResponse(
+            {"status": "error", "message": "No code provided"},
+            status_code=400
+        )
+
+    result = assistant_service.analyze_code_parallel(code)
+
+    if result["status"] == "error":
+        return JSONResponse(result, status_code=500)
+
+    return result
+
+
 @app.post("/api/camera/start")
 async def api_camera_start(payload: dict):
     if not CAMERA_AVAILABLE or camera_service is None:

@@ -1097,6 +1097,20 @@ const Patcher = {
                   Reset
                 </button>
               </div>
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="analyze-code-btn" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #8b5cf6, #3b82f6, #22c55e, #f59e0b); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);" ${!hasCode ? 'disabled' : ''}>
+                  ⚡ Analyze & Improve (4 Agents)
+                </button>
+              </div>
+              <div id="agent-status" style="display: none; margin-top: 10px; padding: 10px; background: ${this.theme.bg.tertiary}; border-radius: 6px; font-size: 11px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+                  <span id="agent-validator" style="color: ${this.theme.text.muted};">○ Validator</span>
+                  <span id="agent-optimizer" style="color: ${this.theme.text.muted};">○ Optimizer</span>
+                  <span id="agent-stylist" style="color: ${this.theme.text.muted};">○ Stylist</span>
+                  <span id="agent-interactivity" style="color: ${this.theme.text.muted};">○ Interactivity</span>
+                </div>
+                <div id="agent-coordinator" style="color: ${this.theme.text.muted}; text-align: center; padding-top: 6px; border-top: 1px solid ${this.theme.node.border};">○ Coordinator</div>
+              </div>
               <div id="code-save-status" style="margin-top: 6px; font-size: 11px; color: ${this.theme.text.muted}; text-align: center;"></div>
             </div>
           </div>
@@ -1190,11 +1204,12 @@ const Patcher = {
 
             generateBtn.disabled = true;
             generateBtn.textContent = 'Generating...';
-            statusDiv.textContent = 'Creating your visual with AI...';
+            statusDiv.textContent = 'Creating interactive visual...';
             statusDiv.style.color = self.theme.text.muted;
 
             try {
               const result = await AudioEngine.generateAICanvas(node.id, prompt);
+
               if (result.status === 'ok') {
                 // Update patcher node's inputs with the extracted parameters
                 const paramNames = (result.parameters || []).map(p => p.name);
@@ -1207,7 +1222,7 @@ const Patcher = {
                   }
                 }
 
-                statusDiv.textContent = `Generated with ${paramNames.length} controllable params!`;
+                statusDiv.textContent = `✓ Generated with ${paramNames.length} interactive params!`;
                 statusDiv.style.color = '#22c55e';
                 generateBtn.textContent = 'Regenerate';
 
@@ -1324,6 +1339,144 @@ const Patcher = {
             codeEditor.value = currentCode;
             codeSaveStatus.textContent = 'Reset to current version';
             codeSaveStatus.style.color = self.theme.text.muted;
+          });
+        }
+
+        // Unified Analyze & Improve button handler (parallel multi-agent)
+        const analyzeBtn = dialog.querySelector('#analyze-code-btn');
+        const agentStatus = dialog.querySelector('#agent-status');
+        const agentValidator = dialog.querySelector('#agent-validator');
+        const agentOptimizer = dialog.querySelector('#agent-optimizer');
+        const agentStylist = dialog.querySelector('#agent-stylist');
+        const agentInteractivity = dialog.querySelector('#agent-interactivity');
+        const agentCoordinator = dialog.querySelector('#agent-coordinator');
+
+        if (analyzeBtn && codeEditor) {
+          analyzeBtn.addEventListener('click', async () => {
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = '⚡ Running 4 Agents in Parallel...';
+            analyzeBtn.style.background = 'linear-gradient(135deg, #6b7280, #6b7280)';
+
+            // Show agent status panel
+            if (agentStatus) {
+              agentStatus.style.display = 'block';
+              agentValidator.textContent = '◐ Validator';
+              agentValidator.style.color = '#f59e0b';
+              agentOptimizer.textContent = '◐ Optimizer';
+              agentOptimizer.style.color = '#f59e0b';
+              agentStylist.textContent = '◐ Stylist';
+              agentStylist.style.color = '#f59e0b';
+              agentInteractivity.textContent = '◐ Interactivity';
+              agentInteractivity.style.color = '#f59e0b';
+              agentCoordinator.textContent = '○ Coordinator (waiting)';
+              agentCoordinator.style.color = self.theme.text.muted;
+            }
+
+            codeSaveStatus.textContent = 'Running parallel analysis...';
+            codeSaveStatus.style.color = self.theme.text.muted;
+
+            try {
+              const result = await AudioEngine.analyzeAICanvasCode(node.id);
+
+              if (result.status === 'ok') {
+                // Update agent status indicators with results
+                if (agentStatus && result.agentResults) {
+                  const ar = result.agentResults;
+
+                  // Validator status
+                  if (ar.validator) {
+                    const vIcon = ar.validator.valid ? '✓' : '⚠';
+                    const vColor = ar.validator.valid ? '#22c55e' : '#f59e0b';
+                    agentValidator.textContent = `${vIcon} Validator (${ar.validator.duration_ms}ms)`;
+                    agentValidator.style.color = vColor;
+                  }
+
+                  // Optimizer status
+                  if (ar.optimizer) {
+                    const oIcon = ar.optimizer.optimized ? '⚡' : '✓';
+                    agentOptimizer.textContent = `${oIcon} Optimizer (${ar.optimizer.duration_ms}ms)`;
+                    agentOptimizer.style.color = '#22c55e';
+                  }
+
+                  // Stylist status
+                  if (ar.stylist) {
+                    const sIcon = ar.stylist.hasIssues ? '✎' : '✓';
+                    agentStylist.textContent = `${sIcon} Stylist (${ar.stylist.duration_ms}ms)`;
+                    agentStylist.style.color = '#22c55e';
+                  }
+
+                  // Interactivity status
+                  if (ar.interactivity) {
+                    const iIcon = ar.interactivity.hasOpportunities ? '🎛' : '✓';
+                    const paramCount = ar.interactivity.paramCount || 0;
+                    agentInteractivity.textContent = `${iIcon} Interactivity (${paramCount} params, ${ar.interactivity.duration_ms}ms)`;
+                    agentInteractivity.style.color = ar.interactivity.hasOpportunities ? '#f59e0b' : '#22c55e';
+                  }
+
+                  // Coordinator status
+                  agentCoordinator.textContent = `✓ Coordinator merged results (${result.timing?.coordinator_ms || 0}ms)`;
+                  agentCoordinator.style.color = '#8b5cf6';
+                }
+
+                // Build summary message
+                const summary = result.summary || {};
+                const changes = result.changes || [];
+                const params = result.parameters || [];
+                const totalChanges = changes.length;
+                const timing = result.timing || {};
+
+                let statusMsg = '';
+                if (totalChanges > 0 || params.length > 0) {
+                  const parts = [];
+                  if (totalChanges > 0) parts.push(`${totalChanges} improvement${totalChanges !== 1 ? 's' : ''}`);
+                  if (params.length > 0) parts.push(`${params.length} interactive param${params.length !== 1 ? 's' : ''}`);
+                  statusMsg = `✓ Applied ${parts.join(', ')} in ${timing.total_ms}ms`;
+                  codeSaveStatus.style.color = '#22c55e';
+                  // Update code editor
+                  codeEditor.value = AudioEngine.nodes[node.id]?.aiCode || '';
+                  // Update node inputs with new parameters from coordinator
+                  if (params.length > 0) {
+                    node.inputs = params.map(p => p.name);
+                    // Store the new parameters
+                    const engineNode = AudioEngine.nodes[node.id];
+                    if (engineNode) {
+                      engineNode.aiParameters = params.map(p => ({
+                        name: p.name,
+                        default: p.default || 0.5,
+                        min: p.min || 0,
+                        max: p.max || 1,
+                        recommendedInput: p.recommendedInput
+                      }));
+                    }
+                  }
+                  updateHistoryUI();
+                } else {
+                  statusMsg = `✓ Code is already optimal! (${timing.total_ms}ms)`;
+                  codeSaveStatus.style.color = '#22c55e';
+                }
+                codeSaveStatus.textContent = statusMsg;
+
+              } else {
+                throw new Error(result.message || 'Analysis failed');
+              }
+            } catch (err) {
+              codeSaveStatus.textContent = 'Error: ' + err.message;
+              codeSaveStatus.style.color = '#f85149';
+              if (agentStatus) {
+                agentValidator.textContent = '✗ Validator';
+                agentValidator.style.color = '#f85149';
+                agentOptimizer.textContent = '✗ Optimizer';
+                agentOptimizer.style.color = '#f85149';
+                agentStylist.textContent = '✗ Stylist';
+                agentStylist.style.color = '#f85149';
+                agentInteractivity.textContent = '✗ Interactivity';
+                agentInteractivity.style.color = '#f85149';
+              }
+            }
+
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = '⚡ Analyze & Improve (4 Agents)';
+            analyzeBtn.style.background = 'linear-gradient(135deg, #8b5cf6, #3b82f6, #22c55e, #f59e0b)';
           });
         }
       }

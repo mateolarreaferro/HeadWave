@@ -1725,11 +1725,25 @@ const AudioEngine = {
         node.aiCode = result.code;
         node.aiPrompt = prompt;
 
-        // Extract parameters
-        const params = await this.extractAIParameters(nodeId, result.code);
+        // Use parameters from generation response if available
+        let params = [];
+        if (result.parameters && result.parameters.length > 0) {
+          params = result.parameters.map(p => ({
+            name: p.name,
+            displayName: p.name,
+            type: 'number',
+            default: p.default || 0.5,
+            min: p.min || 0,
+            max: p.max || 1
+          }));
+        } else {
+          // Fallback to extraction if no params in response
+          params = await this.extractAIParameters(nodeId, result.code);
+        }
+
         node.aiParameters = params || [];
 
-        // Add dynamic inputs based on extracted parameters
+        // Add dynamic inputs based on parameters
         node.aiParameters.forEach(param => {
           node.params[param.name] = param.default;
         });
@@ -1754,7 +1768,11 @@ const AudioEngine = {
         // Set index to latest version
         node.aiHistoryIndex = node.aiHistory.length - 1;
 
-        return { status: 'ok', code: result.code, parameters: node.aiParameters };
+        return {
+          status: 'ok',
+          code: result.code,
+          parameters: node.aiParameters
+        };
       } else if (result.message) {
         return { status: 'error', message: result.message };
       }
@@ -1907,6 +1925,103 @@ const AudioEngine = {
       return { status: 'ok', parameters: node.aiParameters };
     } catch (err) {
       console.error('Error updating AI Canvas code:', err);
+      return { status: 'error', message: err.message };
+    }
+  },
+
+  // Validate AI Canvas code and fix issues
+  validateAICanvasCode: async function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || node.type !== 'aiCanvas' || !node.aiCode) {
+      return { status: 'error', message: 'No code to validate' };
+    }
+
+    try {
+      const response = await fetch('/api/ai/validate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: node.aiCode })
+      });
+
+      if (!response.ok) {
+        throw new Error('Validation request failed');
+      }
+
+      const result = await response.json();
+
+      // If there's fixed code and there were issues, apply the fix
+      if (result.fixedCode && result.issues && result.issues.length > 0) {
+        // Update with fixed code
+        await this.updateAICanvasCode(nodeId, result.fixedCode);
+      }
+
+      return result;
+    } catch (err) {
+      console.error('Error validating code:', err);
+      return { status: 'error', message: err.message };
+    }
+  },
+
+  // Optimize AI Canvas code for performance
+  optimizeAICanvasCode: async function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || node.type !== 'aiCanvas' || !node.aiCode) {
+      return { status: 'error', message: 'No code to optimize' };
+    }
+
+    try {
+      const response = await fetch('/api/ai/optimize-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: node.aiCode })
+      });
+
+      if (!response.ok) {
+        throw new Error('Optimization request failed');
+      }
+
+      const result = await response.json();
+
+      // If there's optimized code, apply it
+      if (result.optimizedCode) {
+        await this.updateAICanvasCode(nodeId, result.optimizedCode);
+      }
+
+      return result;
+    } catch (err) {
+      console.error('Error optimizing code:', err);
+      return { status: 'error', message: err.message };
+    }
+  },
+
+  // Parallel multi-agent code analysis (validator + optimizer + stylist + coordinator)
+  analyzeAICanvasCode: async function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || node.type !== 'aiCanvas' || !node.aiCode) {
+      return { status: 'error', message: 'No code to analyze' };
+    }
+
+    try {
+      const response = await fetch('/api/ai/analyze-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: node.aiCode })
+      });
+
+      if (!response.ok) {
+        throw new Error('Analysis request failed');
+      }
+
+      const result = await response.json();
+
+      // If we got final coordinated code, apply it
+      if (result.finalCode) {
+        await this.updateAICanvasCode(nodeId, result.finalCode);
+      }
+
+      return result;
+    } catch (err) {
+      console.error('Error analyzing code:', err);
       return { status: 'error', message: err.message };
     }
   },

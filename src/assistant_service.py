@@ -2,6 +2,8 @@ import os
 import json
 import re
 from typing import Optional, Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 
 class AssistantService:
@@ -137,77 +139,47 @@ Be concise and always format patches as valid JSON."""
 
     # ============ AI VISUAL GENERATION ============
 
-    P5JS_GENERATION_PROMPT = """You are a p5.js creative coder. Generate a complete p5.js sketch based on the user's description.
+    P5JS_GENERATION_PROMPT = """You are a p5.js expert for HeadWave, a biosignal visual programming tool. Generate a complete, optimized, interactive p5.js sketch.
 
-REQUIREMENTS:
-1. Output ONLY valid JavaScript code for p5.js instance mode
-2. Use this exact format: function(p) { ... }
-3. Include p.setup and p.draw functions
-4. Make the sketch responsive using p.width and p.height
-5. Create visually interesting, animated content
-6. Use p5.js best practices
-7. Use p.getParam('paramName') to access controllable parameters (the system will inject defaults)
+CRITICAL - INTERACTIVE PARAMETERS:
+You MUST include 4-6 parameters using p.getParam('name') that can be controlled by:
+- EEG brain signals (alpha for calm/meditation, beta for focus/energy)
+- Hand tracking (pinch strength, hand position x/y/z)
+- Face tracking (smile, brow raise, gaze direction)
 
-INTERACTIVE BEHAVIORS (IMPORTANT - add these based on context):
+Each p.getParam() call MUST have a sensible default: p.getParam('paramName') || defaultValue
 
-For 3D/WebGL scenes (using rotateX, rotateY, box, sphere, etc.):
-- Add orbit controls: drag to rotate camera, scroll to zoom
-- Use this pattern:
-  let camDist = 500;
-  let rotX = 0, rotY = 0;
-  let dragging = false, lastX, lastY;
+REQUIRED PARAMETERS (include at least these):
+- speed: Controls animation speed (0.001 to 0.1)
+- intensity: Controls visual intensity/size/amplitude (0.1 to 2.0)
+- colorHue: Shifts the color palette (0 to 360)
+- complexity: Controls detail level/count (1 to 20)
 
-  p.mousePressed = function() { dragging = true; lastX = p.mouseX; lastY = p.mouseY; };
-  p.mouseReleased = function() { dragging = false; };
-  p.mouseDragged = function() {
-    if (dragging) {
-      rotY += (p.mouseX - lastX) * 0.01;
-      rotX += (p.mouseY - lastY) * 0.01;
-      lastX = p.mouseX; lastY = p.mouseY;
-    }
-  };
-  p.mouseWheel = function(e) { camDist += e.delta; camDist = p.constrain(camDist, 100, 2000); };
+CODE REQUIREMENTS:
+1. Format: function(p) { ... } (p5.js instance mode)
+2. Include p.setup and p.draw functions
+3. Use p.colorMode(p.HSB, 360, 100, 100, 100) for dynamic colors
+4. Make responsive using p.width and p.height
+5. Add smooth animations (sin/cos waves, noise, lerp)
+6. Performance: cache calculations, avoid creating objects in draw()
 
-  // In draw(): p.camera(0, 0, camDist, 0, 0, 0, 0, 1, 0); p.rotateX(rotX); p.rotateY(rotY);
+MOUSE INTERACTION:
+- 3D scenes: Add orbit controls (drag to rotate, scroll to zoom)
+- 2D scenes: Shapes respond to mouse position
+- Include: mousePressed, mouseDragged, mouseReleased, mouseWheel as needed
 
-For 2D scenes with particles or shapes:
-- Add mouse interaction: shapes can respond to mouse position
-- Use p.mouseX, p.mouseY for attraction/repulsion effects
+OUTPUT FORMAT:
+First output the JavaScript code, then on a new line output "---PARAMS---" followed by a JSON array of parameters.
 
-For generative art:
-- Add click to regenerate: p.mousePressed = function() { /* regenerate pattern */ };
-- Add smooth parameter transitions
-
-Always include:
-- Smooth animations using sin/cos waves, noise, or lerp
-- Use p.getParam() for any value that could be modulated by EEG/CV signals
-- Make colors vibrant and dynamic
-- If a specific background color is provided, USE IT exactly as given (hex format like #RRGGBB)
-- Create a colorHue parameter that shifts the main color palette
-- Use complementary or analogous colors for visual harmony
-
-OUTPUT FORMAT (NO markdown, just the code):
 function(p) {
-  // Your variables here
-
-  p.setup = function() {
-    p.createCanvas(p.windowWidth, p.windowHeight);
-    // OR for 3D: p.createCanvas(p.windowWidth, p.windowHeight, p.WEBGL);
-    p.colorMode(p.HSB, 360, 100, 100, 100);
-  };
-
-  p.draw = function() {
-    // Use p.getParam('speed') etc. to access modulated parameters
-    // Animation code here
-  };
-
-  // Add mouse/keyboard handlers as appropriate
+  // code here
 }
+---PARAMS---
+[{"name":"speed","min":0.001,"max":0.1,"default":0.02},{"name":"intensity","min":0.1,"max":2,"default":1},...]
 
-EXAMPLE for 3D "rotating cubes":
+EXAMPLE OUTPUT:
 function(p) {
-  let camDist = 600;
-  let rotX = -0.4, rotY = 0;
+  let camDist = 600, rotX = -0.4, rotY = 0;
   let dragging = false, lastX, lastY;
 
   p.setup = function() {
@@ -221,8 +193,8 @@ function(p) {
     p.rotateX(rotX);
     p.rotateY(rotY + p.frameCount * (p.getParam('speed') || 0.01));
 
-    let count = p.floor(p.getParam('count') || 5);
-    let size = p.getParam('size') || 50;
+    let count = p.floor(p.getParam('complexity') || 5);
+    let size = (p.getParam('intensity') || 1) * 50;
     let hue = p.getParam('colorHue') || 180;
 
     for (let i = 0; i < count; i++) {
@@ -238,16 +210,14 @@ function(p) {
   p.mousePressed = function() { dragging = true; lastX = p.mouseX; lastY = p.mouseY; };
   p.mouseReleased = function() { dragging = false; };
   p.mouseDragged = function() {
-    if (dragging) {
-      rotY += (p.mouseX - lastX) * 0.01;
-      rotX += (p.mouseY - lastY) * 0.01;
-      lastX = p.mouseX; lastY = p.mouseY;
-    }
+    if (dragging) { rotY += (p.mouseX - lastX) * 0.01; rotX += (p.mouseY - lastY) * 0.01; lastX = p.mouseX; lastY = p.mouseY; }
   };
-  p.mouseWheel = function(e) { camDist += e.delta * 0.5; camDist = p.constrain(camDist, 100, 2000); };
+  p.mouseWheel = function(e) { camDist = p.constrain(camDist + e.delta * 0.5, 100, 2000); };
 }
+---PARAMS---
+[{"name":"speed","min":0.001,"max":0.1,"default":0.01},{"name":"complexity","min":1,"max":15,"default":5},{"name":"intensity","min":0.5,"max":2,"default":1},{"name":"colorHue","min":0,"max":360,"default":180}]
 
-Remember: Output ONLY the JavaScript code, no markdown backticks or explanation."""
+CRITICAL: Your response must start IMMEDIATELY with "function(p)" - no text before it, no markdown, no explanation. Just the raw code followed by ---PARAMS--- and the JSON array."""
 
     PARAMETER_EXTRACTION_PROMPT = """Analyze this p5.js code and identify controllable parameters that could be exposed as node inputs for modulation.
 
@@ -284,7 +254,7 @@ Identify 3-6 meaningful parameters. Output ONLY valid JSON."""
 
     def generate_visual(self, prompt: str, background_color: str = "#0d1117",
                         previous_code: str = None, previous_prompt: str = None) -> Dict[str, Any]:
-        """Generate p5.js code from a natural language description."""
+        """Generate p5.js code from a natural language description with embedded parameters."""
         if not prompt:
             return {"status": "error", "message": "No prompt provided"}
 
@@ -304,7 +274,7 @@ EXISTING CODE TO MODIFY:
 ```
 
 Apply the requested changes while preserving the overall structure and working parts.
-Output the COMPLETE modified code."""
+Output the COMPLETE modified code with ---PARAMS--- section."""
         else:
             # New sketch mode
             user_message = f"Create a p5.js sketch for: {prompt}"
@@ -319,25 +289,48 @@ Output the COMPLETE modified code."""
                     {"role": "user", "content": user_message}
                 ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.7 if previous_code else 0.8,  # Lower temp for modifications
-                max_tokens=2048,
+                temperature=0.7 if previous_code else 0.8,
+                max_tokens=2500,
             )
 
             response_text = chat_completion.choices[0].message.content.strip()
 
-            # Clean up response - remove any markdown code blocks
+            # Parse the response: code + ---PARAMS--- + JSON
             code = response_text
+            parameters = []
+
+            # Check for ---PARAMS--- separator
+            if "---PARAMS---" in response_text:
+                parts = response_text.split("---PARAMS---")
+                code = parts[0].strip()
+                if len(parts) > 1:
+                    params_json = parts[1].strip()
+                    # Clean markdown if present
+                    if "```" in params_json:
+                        matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', params_json)
+                        if matches:
+                            params_json = matches[0].strip()
+                    try:
+                        parameters = json.loads(params_json)
+                    except json.JSONDecodeError:
+                        pass  # Fall back to extraction
+
+            # Clean up code - remove any markdown code blocks
             if "```" in code:
-                # Extract code from markdown
                 matches = re.findall(r'```(?:javascript|js)?\s*([\s\S]*?)```', code)
                 if matches:
                     code = matches[0].strip()
+
+            # Extract just the function - find function(p) { ... }
+            func_match = re.search(r'(function\s*\(\s*p\s*\)\s*\{[\s\S]*\})\s*$', code)
+            if func_match:
+                code = func_match.group(1)
 
             # Validate it looks like a p5.js sketch
             if "function(p)" not in code and "p.setup" not in code:
                 return {"status": "error", "message": "Generated code doesn't appear to be valid p5.js"}
 
-            return {"status": "ok", "code": code}
+            return {"status": "ok", "code": code, "parameters": parameters}
 
         except Exception as e:
             return {"status": "error", "message": f"Error generating visual: {str(e)}"}
@@ -396,3 +389,540 @@ Output the COMPLETE modified code."""
 
         except Exception as e:
             return {"status": "error", "message": f"Error extracting parameters: {str(e)}"}
+
+    # ============ VALIDATION AGENT ============
+
+    VALIDATION_PROMPT = """You are a p5.js code validator. Analyze the provided code for errors and issues.
+
+CHECK FOR:
+1. Syntax errors (missing brackets, semicolons, typos)
+2. Undefined variables or functions
+3. Invalid p5.js API usage
+4. Logic errors that would cause crashes
+5. Missing required functions (setup, draw)
+6. Incorrect function signatures
+7. Division by zero risks
+8. Array index out of bounds risks
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "valid": true/false,
+  "issues": [
+    {
+      "severity": "error" | "warning",
+      "line": "approximate line or location",
+      "message": "description of the issue",
+      "fix": "suggested fix"
+    }
+  ],
+  "fixedCode": "// If there are errors, provide the corrected code here. If valid, return null"
+}
+
+If the code is valid, return: {"valid": true, "issues": [], "fixedCode": null}
+If there are issues, fix them and return the corrected code in fixedCode.
+
+Output ONLY valid JSON."""
+
+    def validate_code(self, code: str) -> Dict[str, Any]:
+        """Validate p5.js code and fix any issues."""
+        if not code:
+            return {"status": "error", "message": "No code provided"}
+
+        if not self.is_available():
+            return {"status": "error", "message": "AI service not available"}
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.VALIDATION_PROMPT},
+                    {"role": "user", "content": f"Validate this p5.js code:\n\n{code}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,  # Low temp for consistent validation
+                max_tokens=2048,
+            )
+
+            response_text = chat_completion.choices[0].message.content.strip()
+
+            # Clean up response
+            json_text = response_text
+            if "```" in json_text:
+                matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
+                if matches:
+                    json_text = matches[0].strip()
+
+            try:
+                result = json.loads(json_text)
+                return {
+                    "status": "ok",
+                    "valid": result.get("valid", True),
+                    "issues": result.get("issues", []),
+                    "fixedCode": result.get("fixedCode")
+                }
+            except json.JSONDecodeError:
+                return {"status": "ok", "valid": True, "issues": [], "fixedCode": None}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Error validating code: {str(e)}"}
+
+    # ============ OPTIMIZATION AGENT ============
+
+    OPTIMIZATION_PROMPT = """You are a p5.js performance optimization expert. Optimize the provided code for maximum performance.
+
+OPTIMIZATION STRATEGIES:
+1. **Reduce draw() overhead**: Move calculations that don't change to setup() or use caching
+2. **Minimize object creation**: Reuse arrays, vectors, objects instead of creating new ones each frame
+3. **Use efficient loops**: Prefer for loops over forEach, avoid nested loops when possible
+4. **Reduce function calls**: Inline simple calculations, avoid unnecessary function wrapping
+5. **Optimize math**: Use bitwise operations for integers, cache repeated calculations
+6. **Batch drawing**: Group similar drawing operations, use beginShape/endShape for complex shapes
+7. **Reduce state changes**: Minimize push()/pop(), fill(), stroke() calls
+8. **Use noStroke()/noFill()**: When not needed
+9. **Limit particles/objects**: Use object pooling for particle systems
+10. **Use frameCount wisely**: Throttle expensive operations (e.g., every 2nd frame)
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "optimized": true/false,
+  "improvements": [
+    {
+      "type": "performance" | "memory" | "readability",
+      "description": "what was optimized",
+      "impact": "high" | "medium" | "low"
+    }
+  ],
+  "optimizedCode": "// The optimized code here",
+  "estimatedSpeedup": "e.g., '~2x faster' or '30% reduction in memory'"
+}
+
+Output ONLY valid JSON with the optimized code."""
+
+    def optimize_code(self, code: str) -> Dict[str, Any]:
+        """Optimize p5.js code for performance."""
+        if not code:
+            return {"status": "error", "message": "No code provided"}
+
+        if not self.is_available():
+            return {"status": "error", "message": "AI service not available"}
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.OPTIMIZATION_PROMPT},
+                    {"role": "user", "content": f"Optimize this p5.js code for performance:\n\n{code}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.3,
+                max_tokens=2048,
+            )
+
+            response_text = chat_completion.choices[0].message.content.strip()
+
+            # Clean up response
+            json_text = response_text
+            if "```" in json_text:
+                matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
+                if matches:
+                    json_text = matches[0].strip()
+
+            try:
+                result = json.loads(json_text)
+                return {
+                    "status": "ok",
+                    "optimized": result.get("optimized", False),
+                    "improvements": result.get("improvements", []),
+                    "optimizedCode": result.get("optimizedCode"),
+                    "estimatedSpeedup": result.get("estimatedSpeedup", "")
+                }
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract just the code
+                return {"status": "error", "message": "Failed to parse optimization result"}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Error optimizing code: {str(e)}"}
+
+    # ============ STYLE/BEST PRACTICES AGENT ============
+
+    STYLE_PROMPT = """You are a p5.js code style and best practices expert. Review the code for style issues and improvements.
+
+REVIEW FOR:
+1. **Code organization**: setup() and draw() structure, variable declarations at top
+2. **Naming conventions**: camelCase for variables, descriptive names
+3. **Magic numbers**: Replace hardcoded values with named constants or parameters
+4. **Redundant code**: DRY principle, extract repeated patterns
+5. **Comments**: Add brief comments for complex logic (but don't over-comment)
+6. **p5.js idioms**: Use p5 functions properly (map, constrain, lerp, etc.)
+7. **Modularity**: Extract complex logic into helper functions
+8. **Color usage**: Consistent color mode, use HSB for dynamic colors
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "hasIssues": true/false,
+  "suggestions": [
+    {
+      "type": "naming" | "organization" | "magic-number" | "redundancy" | "idiom",
+      "description": "what could be improved",
+      "priority": "high" | "medium" | "low"
+    }
+  ],
+  "improvedCode": "// The improved code with style fixes"
+}
+
+Output ONLY valid JSON."""
+
+    def check_style(self, code: str) -> Dict[str, Any]:
+        """Check p5.js code for style and best practices."""
+        if not code:
+            return {"status": "error", "message": "No code provided"}
+
+        if not self.is_available():
+            return {"status": "error", "message": "AI service not available"}
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.STYLE_PROMPT},
+                    {"role": "user", "content": f"Review this p5.js code for style:\n\n{code}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.3,
+                max_tokens=2048,
+            )
+
+            response_text = chat_completion.choices[0].message.content.strip()
+
+            json_text = response_text
+            if "```" in json_text:
+                matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
+                if matches:
+                    json_text = matches[0].strip()
+
+            try:
+                result = json.loads(json_text)
+                return {
+                    "status": "ok",
+                    "hasIssues": result.get("hasIssues", False),
+                    "suggestions": result.get("suggestions", []),
+                    "improvedCode": result.get("improvedCode")
+                }
+            except json.JSONDecodeError:
+                return {"status": "ok", "hasIssues": False, "suggestions": [], "improvedCode": None}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Error checking style: {str(e)}"}
+
+    # ============ INTERACTIVITY AGENT ============
+
+    INTERACTIVITY_PROMPT = """You are a p5.js interactivity expert for HeadWave, a biosignal visual programming environment.
+
+Your job is to identify parameters in the code that should be exposed for real-time control via:
+- EEG brain signals (delta, theta, alpha, beta, gamma bands)
+- Hand tracking (pinch, openness, position x/y/z)
+- Face tracking (smile, brow, mouth, yaw, roll, gaze)
+- LFOs and other modulators
+
+ANALYZE THE CODE FOR:
+1. **Hardcoded values** that could be dynamic (speeds, sizes, counts, colors, positions)
+2. **Animation parameters** (rotation speed, movement amplitude, oscillation frequency)
+3. **Visual properties** (opacity, scale, color hue/saturation, stroke weight)
+4. **Behavioral thresholds** (trigger points, transition speeds, sensitivity)
+
+For each parameter, suggest:
+- A clear name using p.getParam('name') format
+- Reasonable min/max range for the value
+- Which biosignal input would map well to it:
+  * alpha/theta → calm, meditative visuals (slow changes)
+  * beta/gamma → active, energetic visuals (fast changes)
+  * hand pinch → trigger events, control intensity
+  * hand position → spatial control (x/y/z mapping)
+  * face smile/brow → emotional response, mood
+  * gaze x/y → directional control, focus point
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "hasOpportunities": true/false,
+  "parameters": [
+    {
+      "name": "paramName",
+      "currentValue": "the hardcoded value found",
+      "suggestedMin": 0,
+      "suggestedMax": 1,
+      "description": "what this controls",
+      "recommendedInput": "alpha | beta | handPinch | gazeX | etc",
+      "reason": "why this input maps well to this parameter"
+    }
+  ],
+  "improvedCode": "// Code with p.getParam() calls added for all identified parameters"
+}
+
+IMPORTANT:
+- Ensure at least 3-6 meaningful interactive parameters
+- Replace hardcoded values with p.getParam('name') calls
+- Provide sensible defaults that match the original behavior
+- Focus on parameters that create VISIBLE, MEANINGFUL changes when modulated
+
+Output ONLY valid JSON."""
+
+    def check_interactivity(self, code: str) -> Dict[str, Any]:
+        """Identify parameters suitable for biosignal input mapping."""
+        if not code:
+            return {"status": "error", "message": "No code provided"}
+
+        if not self.is_available():
+            return {"status": "error", "message": "AI service not available"}
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.INTERACTIVITY_PROMPT},
+                    {"role": "user", "content": f"Analyze this p5.js code for interactive parameters:\n\n{code}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.4,
+                max_tokens=2500,
+            )
+
+            response_text = chat_completion.choices[0].message.content.strip()
+
+            json_text = response_text
+            if "```" in json_text:
+                matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
+                if matches:
+                    json_text = matches[0].strip()
+
+            try:
+                result = json.loads(json_text)
+                return {
+                    "status": "ok",
+                    "hasOpportunities": result.get("hasOpportunities", False),
+                    "parameters": result.get("parameters", []),
+                    "improvedCode": result.get("improvedCode")
+                }
+            except json.JSONDecodeError:
+                return {"status": "ok", "hasOpportunities": False, "parameters": [], "improvedCode": None}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Error checking interactivity: {str(e)}"}
+
+    # ============ COORDINATOR AGENT ============
+
+    COORDINATOR_PROMPT = """You are a code coordinator for HeadWave, a biosignal visual programming environment. You receive analysis from FOUR specialized agents and must merge their outputs into a single, optimal result.
+
+INPUT FORMAT:
+You will receive JSON with results from:
+1. **validator**: Checks for errors and bugs
+2. **optimizer**: Improves performance
+3. **stylist**: Improves code style and best practices
+4. **interactivity**: Identifies parameters for biosignal input mapping (EEG, hand tracking, face tracking)
+
+YOUR TASK:
+1. Start with the code that has all errors fixed (validator's fixedCode, or original if valid)
+2. Apply performance optimizations that don't conflict with correctness
+3. Apply style improvements that don't conflict with performance
+4. **CRITICAL**: Apply interactivity improvements - ensure all suggested p.getParam() calls are added
+5. If agents disagree, prioritize: correctness > interactivity > performance > style
+6. Preserve all functionality - don't remove features
+
+INTERACTIVITY IS KEY:
+- The final code MUST use p.getParam('paramName') for all identified interactive parameters
+- Ensure 3-6 meaningful parameters are exposed for biosignal control
+- Parameters should create visible, meaningful changes when modulated
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "finalCode": "// The merged, optimal code with all p.getParam() calls",
+  "summary": {
+    "errorsFixed": 0,
+    "optimizationsApplied": 0,
+    "styleImprovements": 0,
+    "interactiveParams": 0
+  },
+  "changes": [
+    {
+      "type": "fix" | "optimization" | "style" | "interactivity",
+      "description": "brief description of change"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "paramName",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "recommendedInput": "alpha | beta | handPinch | etc"
+    }
+  ]
+}
+
+Be decisive and output clean, working, INTERACTIVE code. Output ONLY valid JSON."""
+
+    def _run_agent(self, agent_name: str, code: str) -> Dict[str, Any]:
+        """Run a single agent and return its result with timing."""
+        start = time.time()
+
+        if agent_name == "validator":
+            result = self.validate_code(code)
+        elif agent_name == "optimizer":
+            result = self.optimize_code(code)
+        elif agent_name == "stylist":
+            result = self.check_style(code)
+        elif agent_name == "interactivity":
+            result = self.check_interactivity(code)
+        else:
+            result = {"status": "error", "message": f"Unknown agent: {agent_name}"}
+
+        result["_agent"] = agent_name
+        result["_duration_ms"] = int((time.time() - start) * 1000)
+        return result
+
+    def coordinate_results(self, original_code: str, validator_result: Dict,
+                           optimizer_result: Dict, style_result: Dict,
+                           interactivity_result: Dict = None) -> Dict[str, Any]:
+        """Coordinate and merge results from all agents."""
+        if not self.is_available():
+            return {"status": "error", "message": "AI service not available"}
+
+        interactivity_result = interactivity_result or {}
+
+        # Build context for coordinator
+        context = {
+            "originalCode": original_code,
+            "validator": {
+                "valid": validator_result.get("valid", True),
+                "issues": validator_result.get("issues", []),
+                "fixedCode": validator_result.get("fixedCode")
+            },
+            "optimizer": {
+                "optimized": optimizer_result.get("optimized", False),
+                "improvements": optimizer_result.get("improvements", []),
+                "optimizedCode": optimizer_result.get("optimizedCode"),
+                "speedup": optimizer_result.get("estimatedSpeedup", "")
+            },
+            "stylist": {
+                "hasIssues": style_result.get("hasIssues", False),
+                "suggestions": style_result.get("suggestions", []),
+                "improvedCode": style_result.get("improvedCode")
+            },
+            "interactivity": {
+                "hasOpportunities": interactivity_result.get("hasOpportunities", False),
+                "parameters": interactivity_result.get("parameters", []),
+                "improvedCode": interactivity_result.get("improvedCode")
+            }
+        }
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.COORDINATOR_PROMPT},
+                    {"role": "user", "content": f"Merge these agent results:\n\n{json.dumps(context, indent=2)}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+                max_tokens=4000,
+            )
+
+            response_text = chat_completion.choices[0].message.content.strip()
+
+            json_text = response_text
+            if "```" in json_text:
+                matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
+                if matches:
+                    json_text = matches[0].strip()
+
+            try:
+                result = json.loads(json_text)
+                return {
+                    "status": "ok",
+                    "finalCode": result.get("finalCode"),
+                    "summary": result.get("summary", {}),
+                    "changes": result.get("changes", []),
+                    "parameters": result.get("parameters", [])
+                }
+            except json.JSONDecodeError:
+                # Fallback: return best available code (prefer interactivity code)
+                if interactivity_result.get("improvedCode"):
+                    return {"status": "ok", "finalCode": interactivity_result["improvedCode"],
+                            "summary": {"interactiveParams": len(interactivity_result.get("parameters", []))},
+                            "changes": [], "parameters": interactivity_result.get("parameters", [])}
+                if validator_result.get("fixedCode"):
+                    return {"status": "ok", "finalCode": validator_result["fixedCode"],
+                            "summary": {"errorsFixed": len(validator_result.get("issues", []))},
+                            "changes": [], "parameters": []}
+                return {"status": "ok", "finalCode": original_code, "summary": {}, "changes": [], "parameters": []}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Error coordinating results: {str(e)}"}
+
+    def analyze_code_parallel(self, code: str) -> Dict[str, Any]:
+        """Run all analysis agents in parallel and coordinate results."""
+        if not code:
+            return {"status": "error", "message": "No code provided"}
+
+        if not self.is_available():
+            return {"status": "error", "message": "AI service not available"}
+
+        start_time = time.time()
+        agents = ["validator", "optimizer", "stylist", "interactivity"]
+        results = {}
+
+        # Run all 4 agents in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(self._run_agent, agent, code): agent for agent in agents}
+
+            for future in as_completed(futures):
+                agent_name = futures[future]
+                try:
+                    results[agent_name] = future.result()
+                except Exception as e:
+                    results[agent_name] = {"status": "error", "message": str(e)}
+
+        parallel_time = int((time.time() - start_time) * 1000)
+
+        # Coordinate results from all 4 agents
+        coord_start = time.time()
+        coordinated = self.coordinate_results(
+            code,
+            results.get("validator", {}),
+            results.get("optimizer", {}),
+            results.get("stylist", {}),
+            results.get("interactivity", {})
+        )
+        coord_time = int((time.time() - coord_start) * 1000)
+
+        total_time = int((time.time() - start_time) * 1000)
+
+        return {
+            "status": coordinated.get("status", "ok"),
+            "finalCode": coordinated.get("finalCode"),
+            "summary": coordinated.get("summary", {}),
+            "changes": coordinated.get("changes", []),
+            "parameters": coordinated.get("parameters", []),
+            "agentResults": {
+                "validator": {
+                    "valid": results.get("validator", {}).get("valid", True),
+                    "issueCount": len(results.get("validator", {}).get("issues", [])),
+                    "duration_ms": results.get("validator", {}).get("_duration_ms", 0)
+                },
+                "optimizer": {
+                    "optimized": results.get("optimizer", {}).get("optimized", False),
+                    "improvementCount": len(results.get("optimizer", {}).get("improvements", [])),
+                    "speedup": results.get("optimizer", {}).get("estimatedSpeedup", ""),
+                    "duration_ms": results.get("optimizer", {}).get("_duration_ms", 0)
+                },
+                "stylist": {
+                    "hasIssues": results.get("stylist", {}).get("hasIssues", False),
+                    "suggestionCount": len(results.get("stylist", {}).get("suggestions", [])),
+                    "duration_ms": results.get("stylist", {}).get("_duration_ms", 0)
+                },
+                "interactivity": {
+                    "hasOpportunities": results.get("interactivity", {}).get("hasOpportunities", False),
+                    "paramCount": len(results.get("interactivity", {}).get("parameters", [])),
+                    "duration_ms": results.get("interactivity", {}).get("_duration_ms", 0)
+                }
+            },
+            "timing": {
+                "parallel_ms": parallel_time,
+                "coordinator_ms": coord_time,
+                "total_ms": total_time
+            }
+        }
