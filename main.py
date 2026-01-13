@@ -187,7 +187,19 @@ async def api_generate_visual(payload: dict):
             status_code=400
         )
 
-    result = assistant_service.generate_visual(prompt)
+    # Get optional color settings
+    background_color = payload.get("backgroundColor", "#0d1117")
+
+    # Get previous code context for iterative refinement
+    previous_code = payload.get("previousCode")
+    previous_prompt = payload.get("previousPrompt")
+
+    result = assistant_service.generate_visual(
+        prompt,
+        background_color=background_color,
+        previous_code=previous_code,
+        previous_prompt=previous_prompt
+    )
 
     if result["status"] == "error":
         return JSONResponse(result, status_code=500)

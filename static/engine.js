@@ -1695,11 +1695,23 @@ const AudioEngine = {
     const node = this.nodes[nodeId];
     if (!node || node.type !== 'aiCanvas') return null;
 
+    // Get color settings from node params
+    const backgroundColor = node.params?.background || '#0d1117';
+
+    // Get previous code for context-aware iteration
+    const previousCode = node.aiCode || null;
+    const previousPrompt = node.aiPrompt || null;
+
     try {
       const response = await fetch('/api/ai/generate-visual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({
+          prompt,
+          backgroundColor,
+          previousCode,
+          previousPrompt
+        })
       });
 
       if (!response.ok) {
@@ -1721,6 +1733,26 @@ const AudioEngine = {
         node.aiParameters.forEach(param => {
           node.params[param.name] = param.default;
         });
+
+        // Save to version history
+        const snapshot = {
+          prompt: prompt,
+          code: result.code,
+          parameters: node.aiParameters,
+          backgroundColor: node.params?.background || '#0d1117',
+          timestamp: Date.now()
+        };
+
+        if (!node.aiHistory) node.aiHistory = [];
+        node.aiHistory.push(snapshot);
+
+        // Limit to 10 versions (remove oldest if exceeded)
+        if (node.aiHistory.length > 10) {
+          node.aiHistory.shift();
+        }
+
+        // Set index to latest version
+        node.aiHistoryIndex = node.aiHistory.length - 1;
 
         return { status: 'ok', code: result.code, parameters: node.aiParameters };
       } else if (result.message) {
@@ -1752,6 +1784,131 @@ const AudioEngine = {
       console.error('Parameter extraction error:', err);
     }
     return [];
+  },
+
+  // ============ AI CANVAS HISTORY METHODS ============
+
+  // Navigate to previous version in history
+  aiCanvasHistoryPrev: function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || !node.aiHistory || node.aiHistory.length === 0) return false;
+
+    if (node.aiHistoryIndex > 0) {
+      node.aiHistoryIndex--;
+      this._restoreAICanvasVersion(nodeId);
+      return true;
+    }
+    return false;
+  },
+
+  // Navigate to next version in history
+  aiCanvasHistoryNext: function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || !node.aiHistory) return false;
+
+    if (node.aiHistoryIndex < node.aiHistory.length - 1) {
+      node.aiHistoryIndex++;
+      this._restoreAICanvasVersion(nodeId);
+      return true;
+    }
+    return false;
+  },
+
+  // Restore a version from history
+  _restoreAICanvasVersion: function(nodeId) {
+    const node = this.nodes[nodeId];
+    const snapshot = node.aiHistory[node.aiHistoryIndex];
+    if (!snapshot) return;
+
+    // Restore state from snapshot
+    node.aiCode = snapshot.code;
+    node.aiPrompt = snapshot.prompt;
+    node.aiParameters = snapshot.parameters;
+    node.params.prompt = snapshot.prompt;
+    node.params.background = snapshot.backgroundColor;
+
+    // Update inputs from parameters
+    node.inputs = snapshot.parameters.map(p => p.name);
+
+    // Reset parameter values to defaults
+    snapshot.parameters.forEach(param => {
+      node.params[param.name] = param.default;
+    });
+
+    // Reset visual renderer state to reinitialize with new code
+    if (typeof VisualRenderer !== 'undefined') {
+      delete VisualRenderer.aiCanvasInitialized[nodeId];
+      delete VisualRenderer.aiCanvasDrawFunctions[nodeId];
+    }
+
+    console.log(`[AudioEngine] Restored AI Canvas to version ${node.aiHistoryIndex + 1}`);
+  },
+
+  // Get history info for UI display
+  getAICanvasHistoryInfo: function(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node || !node.aiHistory || node.aiHistory.length === 0) {
+      return { total: 0, current: 0, hasHistory: false, canPrev: false, canNext: false };
+    }
+    return {
+      total: node.aiHistory.length,
+      current: node.aiHistoryIndex + 1,
+      hasHistory: node.aiHistory.length > 1,
+      canPrev: node.aiHistoryIndex > 0,
+      canNext: node.aiHistoryIndex < node.aiHistory.length - 1
+    };
+  },
+
+  // Update AI Canvas code directly (for manual editing)
+  updateAICanvasCode: async function(nodeId, newCode) {
+    const node = this.nodes[nodeId];
+    if (!node || node.type !== 'aiCanvas') return { status: 'error', message: 'Invalid node' };
+
+    try {
+      // Update the code
+      node.aiCode = newCode;
+
+      // Re-extract parameters from the new code
+      const params = await this.extractAIParameters(nodeId, newCode);
+      node.aiParameters = params || [];
+
+      // Update inputs
+      node.inputs = node.aiParameters.map(p => p.name);
+
+      // Reset parameter values to defaults
+      node.aiParameters.forEach(param => {
+        node.params[param.name] = param.default;
+      });
+
+      // Save to history as a manual edit
+      const snapshot = {
+        prompt: node.aiPrompt || '(manual edit)',
+        code: newCode,
+        parameters: node.aiParameters,
+        backgroundColor: node.params?.background || '#0d1117',
+        timestamp: Date.now()
+      };
+
+      if (!node.aiHistory) node.aiHistory = [];
+      node.aiHistory.push(snapshot);
+
+      if (node.aiHistory.length > 10) {
+        node.aiHistory.shift();
+      }
+
+      node.aiHistoryIndex = node.aiHistory.length - 1;
+
+      // Reset visual renderer state
+      if (typeof VisualRenderer !== 'undefined') {
+        delete VisualRenderer.aiCanvasInitialized[nodeId];
+        delete VisualRenderer.aiCanvasDrawFunctions[nodeId];
+      }
+
+      return { status: 'ok', parameters: node.aiParameters };
+    } catch (err) {
+      console.error('Error updating AI Canvas code:', err);
+      return { status: 'error', message: err.message };
+    }
   },
 
   // Execute AI Canvas in a container element

@@ -365,8 +365,8 @@ const Patcher = {
     // AI Canvas - width based on number of inputs
     if (node.type === 'aiCanvas') {
       const numInputs = (node.inputs || []).length;
-      // Each input needs ~70px for label, minimum 200px
-      const width = Math.max(200, numInputs * 70);
+      // Each input needs ~110px for label, minimum 200px
+      const width = Math.max(200, numInputs * 110);
       return { width: width, height: 140 };
     } else if (node.type === 'output') {
       return { width: 280, height: 200 };
@@ -1055,6 +1055,52 @@ const Patcher = {
             <div id="generate-status" style="margin-top: 8px; font-size: 12px; color: ${this.theme.text.muted}; text-align: center;"></div>
           </div>
         `;
+
+        // Add history navigation controls
+        const historyInfo = AudioEngine.getAICanvasHistoryInfo(node.id);
+        html += `
+          <div id="ai-history-controls" style="display: ${historyInfo.hasHistory ? 'flex' : 'none'};
+               align-items: center; justify-content: center; gap: 12px; margin-bottom: 14px;
+               padding: 10px; background: ${this.theme.bg.tertiary}; border-radius: 6px;">
+            <button id="ai-history-prev" ${!historyInfo.canPrev ? 'disabled' : ''}
+              style="padding: 6px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary};
+                     border: 1px solid ${this.theme.node.border}; border-radius: 4px; cursor: pointer;
+                     opacity: ${historyInfo.canPrev ? '1' : '0.4'};">
+              ◀ Prev
+            </button>
+            <span id="ai-history-info" style="color: ${this.theme.text.secondary}; font-size: 12px;">
+              Version ${historyInfo.current} of ${historyInfo.total}
+            </span>
+            <button id="ai-history-next" ${!historyInfo.canNext ? 'disabled' : ''}
+              style="padding: 6px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary};
+                     border: 1px solid ${this.theme.node.border}; border-radius: 4px; cursor: pointer;
+                     opacity: ${historyInfo.canNext ? '1' : '0.4'};">
+              Next ▶
+            </button>
+          </div>
+        `;
+
+        // Add View/Edit Code section
+        const hasCode = AudioEngine.nodes[node.id]?.aiCode;
+        html += `
+          <div style="margin-bottom: 14px;">
+            <button id="toggle-code-editor" style="width: 100%; padding: 8px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.secondary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 12px;">
+              ${hasCode ? '{ } View / Edit Code' : '{ } Code Editor (generate first)'}
+            </button>
+            <div id="code-editor-container" style="display: none; margin-top: 10px;">
+              <textarea id="ai-code-editor" style="width: 100%; height: 300px; padding: 12px; background: #1e1e1e; color: #d4d4d4; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.4; resize: vertical; box-sizing: border-box;">${hasCode ? AudioEngine.nodes[node.id].aiCode : '// Generate a visual first'}</textarea>
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="save-code-btn" style="flex: 1; padding: 8px; background: ${accentColor}; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;" ${!hasCode ? 'disabled' : ''}>
+                  Save Changes
+                </button>
+                <button id="reset-code-btn" style="padding: 8px 12px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 12px;" ${!hasCode ? 'disabled' : ''}>
+                  Reset
+                </button>
+              </div>
+              <div id="code-save-status" style="margin-top: 6px; font-size: 11px; color: ${this.theme.text.muted}; text-align: center;"></div>
+            </div>
+          </div>
+        `;
       }
 
       html += `
@@ -1177,6 +1223,107 @@ const Patcher = {
             }
 
             generateBtn.disabled = false;
+          });
+        }
+
+        // History navigation handlers
+        const prevBtn = dialog.querySelector('#ai-history-prev');
+        const nextBtn = dialog.querySelector('#ai-history-next');
+        const historyInfoSpan = dialog.querySelector('#ai-history-info');
+        const historyControls = dialog.querySelector('#ai-history-controls');
+
+        const updateHistoryUI = () => {
+          const info = AudioEngine.getAICanvasHistoryInfo(node.id);
+          if (historyControls) {
+            historyControls.style.display = info.hasHistory ? 'flex' : 'none';
+          }
+          if (historyInfoSpan) {
+            historyInfoSpan.textContent = `Version ${info.current} of ${info.total}`;
+          }
+          if (prevBtn) {
+            prevBtn.disabled = !info.canPrev;
+            prevBtn.style.opacity = info.canPrev ? '1' : '0.4';
+          }
+          if (nextBtn) {
+            nextBtn.disabled = !info.canNext;
+            nextBtn.style.opacity = info.canNext ? '1' : '0.4';
+          }
+        };
+
+        if (prevBtn) {
+          prevBtn.addEventListener('click', () => {
+            if (AudioEngine.aiCanvasHistoryPrev(node.id)) {
+              rebuildDialog(); // Rebuild to show restored parameters
+            }
+          });
+        }
+
+        if (nextBtn) {
+          nextBtn.addEventListener('click', () => {
+            if (AudioEngine.aiCanvasHistoryNext(node.id)) {
+              rebuildDialog(); // Rebuild to show restored parameters
+            }
+          });
+        }
+
+        // Code editor handlers
+        const toggleCodeBtn = dialog.querySelector('#toggle-code-editor');
+        const codeEditorContainer = dialog.querySelector('#code-editor-container');
+        const codeEditor = dialog.querySelector('#ai-code-editor');
+        const saveCodeBtn = dialog.querySelector('#save-code-btn');
+        const resetCodeBtn = dialog.querySelector('#reset-code-btn');
+        const codeSaveStatus = dialog.querySelector('#code-save-status');
+
+        if (toggleCodeBtn && codeEditorContainer) {
+          toggleCodeBtn.addEventListener('click', () => {
+            const isHidden = codeEditorContainer.style.display === 'none';
+            codeEditorContainer.style.display = isHidden ? 'block' : 'none';
+            toggleCodeBtn.textContent = isHidden ? '{ } Hide Code Editor' : '{ } View / Edit Code';
+          });
+        }
+
+        if (saveCodeBtn && codeEditor) {
+          saveCodeBtn.addEventListener('click', async () => {
+            const newCode = codeEditor.value;
+            if (!newCode.trim()) {
+              codeSaveStatus.textContent = 'Code cannot be empty';
+              codeSaveStatus.style.color = '#f85149';
+              return;
+            }
+
+            saveCodeBtn.disabled = true;
+            saveCodeBtn.textContent = 'Saving...';
+            codeSaveStatus.textContent = 'Updating visual...';
+            codeSaveStatus.style.color = self.theme.text.muted;
+
+            try {
+              const result = await AudioEngine.updateAICanvasCode(node.id, newCode);
+              if (result.status === 'ok') {
+                // Update node inputs with new parameters
+                node.inputs = (result.parameters || []).map(p => p.name);
+                codeSaveStatus.textContent = 'Code saved! Visual updated.';
+                codeSaveStatus.style.color = '#22c55e';
+                // Update history UI
+                updateHistoryUI();
+              } else {
+                throw new Error(result.message || 'Save failed');
+              }
+            } catch (err) {
+              codeSaveStatus.textContent = 'Error: ' + err.message;
+              codeSaveStatus.style.color = '#f85149';
+            }
+
+            saveCodeBtn.disabled = false;
+            saveCodeBtn.textContent = 'Save Changes';
+          });
+        }
+
+        if (resetCodeBtn && codeEditor) {
+          resetCodeBtn.addEventListener('click', () => {
+            const currentCode = AudioEngine.nodes[node.id]?.aiCode || '';
+            codeEditor.value = currentCode;
+            codeSaveStatus.textContent = 'Reset to current version';
+            codeSaveStatus.style.color = self.theme.text.muted;
           });
         }
       }

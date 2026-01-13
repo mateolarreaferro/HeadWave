@@ -148,12 +148,51 @@ REQUIREMENTS:
 6. Use p5.js best practices
 7. Use p.getParam('paramName') to access controllable parameters (the system will inject defaults)
 
+INTERACTIVE BEHAVIORS (IMPORTANT - add these based on context):
+
+For 3D/WebGL scenes (using rotateX, rotateY, box, sphere, etc.):
+- Add orbit controls: drag to rotate camera, scroll to zoom
+- Use this pattern:
+  let camDist = 500;
+  let rotX = 0, rotY = 0;
+  let dragging = false, lastX, lastY;
+
+  p.mousePressed = function() { dragging = true; lastX = p.mouseX; lastY = p.mouseY; };
+  p.mouseReleased = function() { dragging = false; };
+  p.mouseDragged = function() {
+    if (dragging) {
+      rotY += (p.mouseX - lastX) * 0.01;
+      rotX += (p.mouseY - lastY) * 0.01;
+      lastX = p.mouseX; lastY = p.mouseY;
+    }
+  };
+  p.mouseWheel = function(e) { camDist += e.delta; camDist = p.constrain(camDist, 100, 2000); };
+
+  // In draw(): p.camera(0, 0, camDist, 0, 0, 0, 0, 1, 0); p.rotateX(rotX); p.rotateY(rotY);
+
+For 2D scenes with particles or shapes:
+- Add mouse interaction: shapes can respond to mouse position
+- Use p.mouseX, p.mouseY for attraction/repulsion effects
+
+For generative art:
+- Add click to regenerate: p.mousePressed = function() { /* regenerate pattern */ };
+- Add smooth parameter transitions
+
+Always include:
+- Smooth animations using sin/cos waves, noise, or lerp
+- Use p.getParam() for any value that could be modulated by EEG/CV signals
+- Make colors vibrant and dynamic
+- If a specific background color is provided, USE IT exactly as given (hex format like #RRGGBB)
+- Create a colorHue parameter that shifts the main color palette
+- Use complementary or analogous colors for visual harmony
+
 OUTPUT FORMAT (NO markdown, just the code):
 function(p) {
   // Your variables here
 
   p.setup = function() {
     p.createCanvas(p.windowWidth, p.windowHeight);
+    // OR for 3D: p.createCanvas(p.windowWidth, p.windowHeight, p.WEBGL);
     p.colorMode(p.HSB, 360, 100, 100, 100);
   };
 
@@ -161,44 +200,51 @@ function(p) {
     // Use p.getParam('speed') etc. to access modulated parameters
     // Animation code here
   };
+
+  // Add mouse/keyboard handlers as appropriate
 }
 
-EXAMPLE for "fractals":
+EXAMPLE for 3D "rotating cubes":
 function(p) {
-  let angle = 0;
-  let maxDepth = 8;
+  let camDist = 600;
+  let rotX = -0.4, rotY = 0;
+  let dragging = false, lastX, lastY;
 
   p.setup = function() {
-    p.createCanvas(p.windowWidth, p.windowHeight);
+    p.createCanvas(p.windowWidth, p.windowHeight, p.WEBGL);
     p.colorMode(p.HSB, 360, 100, 100, 100);
   };
 
   p.draw = function() {
-    p.background(0, 0, 10);
-    p.translate(p.width/2, p.height);
+    p.background(240, 20, 10);
+    p.camera(0, 0, camDist, 0, 0, 0, 0, 1, 0);
+    p.rotateX(rotX);
+    p.rotateY(rotY + p.frameCount * (p.getParam('speed') || 0.01));
 
-    let speed = p.getParam('speed') || 0.01;
-    angle = p.sin(p.frameCount * speed) * 0.5;
+    let count = p.floor(p.getParam('count') || 5);
+    let size = p.getParam('size') || 50;
+    let hue = p.getParam('colorHue') || 180;
 
-    branch(100, maxDepth);
+    for (let i = 0; i < count; i++) {
+      p.push();
+      p.rotateY(i * p.TWO_PI / count);
+      p.translate(150, 0, 0);
+      p.fill((hue + i * 30) % 360, 70, 80);
+      p.box(size);
+      p.pop();
+    }
   };
 
-  function branch(len, depth) {
-    if (depth <= 0) return;
-    let hue = p.getParam('colorHue') || 180;
-    p.stroke(p.map(depth, 0, maxDepth, hue, hue + 100) % 360, 80, 90, 80);
-    p.strokeWeight(depth * 0.5);
-    p.line(0, 0, 0, -len);
-    p.translate(0, -len);
-    p.push();
-    p.rotate(angle);
-    branch(len * 0.7, depth - 1);
-    p.pop();
-    p.push();
-    p.rotate(-angle);
-    branch(len * 0.7, depth - 1);
-    p.pop();
-  }
+  p.mousePressed = function() { dragging = true; lastX = p.mouseX; lastY = p.mouseY; };
+  p.mouseReleased = function() { dragging = false; };
+  p.mouseDragged = function() {
+    if (dragging) {
+      rotY += (p.mouseX - lastX) * 0.01;
+      rotX += (p.mouseY - lastY) * 0.01;
+      lastX = p.mouseX; lastY = p.mouseY;
+    }
+  };
+  p.mouseWheel = function(e) { camDist += e.delta * 0.5; camDist = p.constrain(camDist, 100, 2000); };
 }
 
 Remember: Output ONLY the JavaScript code, no markdown backticks or explanation."""
@@ -236,7 +282,8 @@ OUTPUT FORMAT (valid JSON only, no markdown):
 
 Identify 3-6 meaningful parameters. Output ONLY valid JSON."""
 
-    def generate_visual(self, prompt: str) -> Dict[str, Any]:
+    def generate_visual(self, prompt: str, background_color: str = "#0d1117",
+                        previous_code: str = None, previous_prompt: str = None) -> Dict[str, Any]:
         """Generate p5.js code from a natural language description."""
         if not prompt:
             return {"status": "error", "message": "No prompt provided"}
@@ -244,14 +291,35 @@ Identify 3-6 meaningful parameters. Output ONLY valid JSON."""
         if not self.is_available():
             return {"status": "error", "message": "AI service not available"}
 
+        # Build the user message
+        if previous_code:
+            # Iterative refinement mode - modify existing code
+            user_message = f"""MODIFY the existing p5.js sketch based on this request: "{prompt}"
+
+PREVIOUS PROMPT: {previous_prompt or 'N/A'}
+
+EXISTING CODE TO MODIFY:
+```javascript
+{previous_code}
+```
+
+Apply the requested changes while preserving the overall structure and working parts.
+Output the COMPLETE modified code."""
+        else:
+            # New sketch mode
+            user_message = f"Create a p5.js sketch for: {prompt}"
+
+        if background_color and background_color != "#0d1117":
+            user_message += f"\n\nIMPORTANT: Use this background color: {background_color}"
+
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": self.P5JS_GENERATION_PROMPT},
-                    {"role": "user", "content": f"Create a p5.js sketch for: {prompt}"}
+                    {"role": "user", "content": user_message}
                 ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.8,
+                temperature=0.7 if previous_code else 0.8,  # Lower temp for modifications
                 max_tokens=2048,
             )
 

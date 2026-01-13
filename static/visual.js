@@ -25,19 +25,43 @@ const VisualRenderer = {
     return true;
   },
 
-  createP5Instance: function(container) {
+  // Track if current canvas is WebGL
+  isWebGL: false,
+
+  // WebGL function patterns to detect
+  webglPatterns: /\b(rotateX|rotateY|rotateZ|box|sphere|cylinder|cone|torus|plane|camera|perspective|ortho|ambientLight|directionalLight|pointLight|spotLight|normalMaterial|ambientMaterial|specularMaterial|shininess|texture|createGraphics.*WEBGL|WEBGL)\b/,
+
+  // Check if code needs WebGL
+  needsWebGL: function(code) {
+    return this.webglPatterns.test(code);
+  },
+
+  createP5Instance: function(container, useWebGL = false) {
     const self = this;
+    this.isWebGL = useWebGL;
 
     const sketch = function(p) {
       p.setup = function() {
-        const canvas = p.createCanvas(container.clientWidth, container.clientHeight);
+        const w = container.clientWidth || 800;
+        const h = container.clientHeight || 600;
+        const canvas = useWebGL
+          ? p.createCanvas(w, h, p.WEBGL)
+          : p.createCanvas(w, h);
         canvas.parent(container);
-        p.colorMode(p.HSB, 360, 100, 100, 255);
+        if (!useWebGL) {
+          p.colorMode(p.HSB, 360, 100, 100, 255);
+        }
         p.frameRate(60);
       };
 
       p.windowResized = function() {
-        p.resizeCanvas(container.clientWidth, container.clientHeight);
+        const w = container.clientWidth || 800;
+        const h = container.clientHeight || 600;
+        if (useWebGL) {
+          p.resizeCanvas(w, h, p.WEBGL);
+        } else {
+          p.resizeCanvas(w, h);
+        }
       };
 
       p.draw = function() {
@@ -120,7 +144,23 @@ const VisualRenderer = {
     // Force enable since we're entering fullscreen
     this.enabled = true;
 
-    this.createP5Instance(this.fullscreenContainer);
+    // Check if any connected AI Canvas needs WebGL
+    let needsWebGL = false;
+    if (typeof AudioEngine !== 'undefined') {
+      const connectedNodes = AudioEngine.getConnectedVisualNodes?.() || [];
+      for (const node of connectedNodes) {
+        if (node.type === 'aiCanvas') {
+          const liveNode = AudioEngine.nodes[node.id];
+          const aiCode = liveNode?.aiCode || node.aiCode;
+          if (aiCode && this.needsWebGL(aiCode)) {
+            needsWebGL = true;
+            break;
+          }
+        }
+      }
+    }
+
+    this.createP5Instance(this.fullscreenContainer, needsWebGL);
     this.isFullscreen = true;
 
     console.log('[VisualRenderer] Entered fullscreen mode');
@@ -244,6 +284,21 @@ const VisualRenderer = {
       return;
     }
 
+    // Check if we need to switch to WebGL mode
+    const codeNeedsWebGL = this.needsWebGL(aiCode);
+    if (codeNeedsWebGL && !this.isWebGL) {
+      console.log('[VisualRenderer] AI code requires WebGL, recreating canvas...');
+      // Need to recreate canvas with WebGL
+      if (this.p5Instance) {
+        this.p5Instance.remove();
+      }
+      this.aiCanvasInitialized = {};
+      this.aiCanvasDrawFunctions = {};
+      const container = this.isFullscreen ? this.fullscreenContainer : this.previewContainer;
+      this.createP5Instance(container, true);
+      return; // Will reinitialize on next frame
+    }
+
     // Initialize the AI canvas code if not done yet
     if (!this.aiCanvasInitialized[nodeId]) {
       console.log('[VisualRenderer] Initializing AI Canvas:', nodeId);
@@ -251,9 +306,15 @@ const VisualRenderer = {
       try {
         const self = this;
 
-        // Create a proxy p5 object that captures setup/draw
+        // Create a proxy p5 object that captures setup/draw and mouse events
         const capturedSetup = { fn: null };
         const capturedDraw = { fn: null };
+        const capturedMousePressed = { fn: null };
+        const capturedMouseReleased = { fn: null };
+        const capturedMouseDragged = { fn: null };
+        const capturedMouseWheel = { fn: null };
+        const capturedMouseMoved = { fn: null };
+        const capturedKeyPressed = { fn: null };
 
         const proxyP = new Proxy(p, {
           set: function(target, prop, value) {
@@ -263,6 +324,30 @@ const VisualRenderer = {
             }
             if (prop === 'draw') {
               capturedDraw.fn = value;
+              return true;
+            }
+            if (prop === 'mousePressed') {
+              capturedMousePressed.fn = value;
+              return true;
+            }
+            if (prop === 'mouseReleased') {
+              capturedMouseReleased.fn = value;
+              return true;
+            }
+            if (prop === 'mouseDragged') {
+              capturedMouseDragged.fn = value;
+              return true;
+            }
+            if (prop === 'mouseWheel') {
+              capturedMouseWheel.fn = value;
+              return true;
+            }
+            if (prop === 'mouseMoved') {
+              capturedMouseMoved.fn = value;
+              return true;
+            }
+            if (prop === 'keyPressed') {
+              capturedKeyPressed.fn = value;
               return true;
             }
             target[prop] = value;
@@ -291,6 +376,11 @@ const VisualRenderer = {
         console.log('[VisualRenderer] Executed sketch function');
         console.log('[VisualRenderer] Captured setup:', !!capturedSetup.fn);
         console.log('[VisualRenderer] Captured draw:', !!capturedDraw.fn);
+        console.log('[VisualRenderer] Captured mouse events:', {
+          mousePressed: !!capturedMousePressed.fn,
+          mouseDragged: !!capturedMouseDragged.fn,
+          mouseWheel: !!capturedMouseWheel.fn
+        });
 
         // Store the captured functions
         if (capturedSetup.fn) {
@@ -307,6 +397,26 @@ const VisualRenderer = {
 
         if (capturedDraw.fn) {
           this.aiCanvasDrawFunctions[nodeId] = capturedDraw.fn;
+        }
+
+        // Attach mouse event handlers to the p5 instance
+        if (capturedMousePressed.fn) {
+          p.mousePressed = capturedMousePressed.fn;
+        }
+        if (capturedMouseReleased.fn) {
+          p.mouseReleased = capturedMouseReleased.fn;
+        }
+        if (capturedMouseDragged.fn) {
+          p.mouseDragged = capturedMouseDragged.fn;
+        }
+        if (capturedMouseWheel.fn) {
+          p.mouseWheel = capturedMouseWheel.fn;
+        }
+        if (capturedMouseMoved.fn) {
+          p.mouseMoved = capturedMouseMoved.fn;
+        }
+        if (capturedKeyPressed.fn) {
+          p.keyPressed = capturedKeyPressed.fn;
         }
 
         this.aiCanvasInitialized[nodeId] = true;
@@ -532,19 +642,36 @@ const VisualRenderer = {
 
     switch (node.type) {
       case 'aiCanvas':
-        // AI Canvas preview - show indicator that it's active
+        // AI Canvas preview - draw actual p5 canvas content if available
         const liveNode = AudioEngine.nodes[node.id];
         if (liveNode?.aiCode) {
-          // Draw animated indicator
-          const t = Date.now() / 1000;
-          ctx.fillStyle = `hsl(${(t * 50) % 360}, 70%, 50%)`;
-          ctx.beginPath();
-          ctx.arc(ox + w/2, oy + h/2, Math.min(w, h) * 0.3, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#fff';
-          ctx.font = '10px -apple-system';
-          ctx.textAlign = 'center';
-          ctx.fillText('AI Visual Active', ox + w/2, oy + h - 10);
+          // Try to get the p5 canvas from the preview container
+          let p5Canvas = null;
+          if (this.previewContainer) {
+            p5Canvas = this.previewContainer.querySelector('canvas');
+          }
+          if (!p5Canvas && this.p5Instance) {
+            p5Canvas = this.p5Instance.canvas;
+          }
+
+          if (p5Canvas && p5Canvas.width > 0 && p5Canvas.height > 0) {
+            // Draw the actual p5 canvas content scaled to fit preview
+            try {
+              ctx.drawImage(p5Canvas, ox, oy, w, h);
+            } catch (e) {
+              // Fallback to indicator if canvas draw fails
+              ctx.fillStyle = '#666';
+              ctx.font = '10px -apple-system';
+              ctx.textAlign = 'center';
+              ctx.fillText('AI Visual Active', ox + w/2, oy + h/2);
+            }
+          } else {
+            // Canvas not ready yet
+            ctx.fillStyle = '#666';
+            ctx.font = '10px -apple-system';
+            ctx.textAlign = 'center';
+            ctx.fillText('AI Visual Active', ox + w/2, oy + h/2);
+          }
         } else {
           ctx.fillStyle = '#666';
           ctx.font = '10px -apple-system';

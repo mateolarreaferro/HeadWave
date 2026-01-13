@@ -7,9 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
   <script src="/static/sketch.js"></script>
-  <script src="/static/engine.js?v=12"></script>
-  <script src="/static/visual.js?v=6"></script>
-  <script src="/static/patcher.js?v=11"></script>
+  <script src="/static/engine.js?v=15"></script>
+  <script src="/static/visual.js?v=9"></script>
+  <script src="/static/patcher.js?v=14"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -914,6 +914,20 @@
       .chart-container {
         height: 320px;
       }
+    }
+
+    /* Visual preview container - offscreen but with size for p5 rendering */
+    #visual-preview-wrapper {
+      position: fixed;
+      left: -9999px;
+      top: -9999px;
+      width: 800px;
+      height: 600px;
+      overflow: hidden;
+    }
+    #visual-preview-container {
+      width: 100%;
+      height: 100%;
     }
   </style>
 </head>
