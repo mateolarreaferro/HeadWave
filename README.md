@@ -28,4 +28,4 @@ Open http://localhost:8000
 
 ## Acknowledgments
 
-Inspired by [Spellburst](https://spellburst.github.io/) by Miroslav Suzara et al. - a node-based interface for exploratory creative coding with LLMs.
+Inspired by [Spellburst](https://spellburst.github.io/) by my old TA Miroslav Suzara et al. - a node-based interface for exploratory creative coding with LLMs.
