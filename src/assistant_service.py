@@ -141,15 +141,11 @@ Be concise and always format patches as valid JSON."""
 
     P5JS_GENERATION_PROMPT = """You are a p5.js expert for HeadWave, a biosignal visual programming tool. Generate a complete, optimized, interactive p5.js sketch.
 
-CRITICAL - INTERACTIVE PARAMETERS:
-You MUST include 4-6 parameters using p.getParam('name') that can be controlled by:
-- EEG brain signals (alpha for calm/meditation, beta for focus/energy)
-- Hand tracking (pinch strength, hand position x/y/z)
-- Face tracking (smile, brow raise, gaze direction)
-
+INTERACTIVE PARAMETERS:
+Include 3-4 parameters using p.getParam('name') for real-time control.
 Each p.getParam() call MUST have a sensible default: p.getParam('paramName') || defaultValue
 
-REQUIRED PARAMETERS (include at least these):
+RECOMMENDED PARAMETERS:
 - speed: Controls animation speed (0.001 to 0.1)
 - intensity: Controls visual intensity/size/amplitude (0.1 to 2.0)
 - colorHue: Shifts the color palette (0 to 360)
@@ -162,11 +158,7 @@ CODE REQUIREMENTS:
 4. Make responsive using p.width and p.height
 5. Add smooth animations (sin/cos waves, noise, lerp)
 6. Performance: cache calculations, avoid creating objects in draw()
-
-MOUSE INTERACTION:
-- 3D scenes: Add orbit controls (drag to rotate, scroll to zoom)
-- 2D scenes: Shapes respond to mouse position
-- Include: mousePressed, mouseDragged, mouseReleased, mouseWheel as needed
+7. DO NOT include debug text or parameter value displays - only render visual elements
 
 OUTPUT FORMAT:
 First output the JavaScript code, then on a new line output "---PARAMS---" followed by a JSON array of parameters.
@@ -179,43 +171,42 @@ function(p) {
 
 EXAMPLE OUTPUT:
 function(p) {
-  let camDist = 600, rotX = -0.4, rotY = 0;
-  let dragging = false, lastX, lastY;
+  let t = 0;
 
   p.setup = function() {
-    p.createCanvas(p.windowWidth, p.windowHeight, p.WEBGL);
+    p.createCanvas(400, 400);
     p.colorMode(p.HSB, 360, 100, 100, 100);
+    p.noStroke();
   };
 
   p.draw = function() {
-    p.background(240, 20, 10);
-    p.camera(0, 0, camDist, 0, 0, 0, 0, 1, 0);
-    p.rotateX(rotX);
-    p.rotateY(rotY + p.frameCount * (p.getParam('speed') || 0.01));
+    p.background(0, 0, 10);
+    let speed = p.getParam('speed') || 0.02;
+    let intensity = p.getParam('intensity') || 1;
+    let hue = p.getParam('colorHue') || 200;
+    let count = p.floor(p.getParam('complexity') || 8);
 
-    let count = p.floor(p.getParam('complexity') || 5);
-    let size = (p.getParam('intensity') || 1) * 50;
-    let hue = p.getParam('colorHue') || 180;
+    t += speed;
+    p.translate(p.width/2, p.height/2);
 
     for (let i = 0; i < count; i++) {
-      p.push();
-      p.rotateY(i * p.TWO_PI / count);
-      p.translate(150, 0, 0);
-      p.fill((hue + i * 30) % 360, 70, 80);
-      p.box(size);
-      p.pop();
+      let angle = p.TWO_PI * i / count + t;
+      let r = 80 + p.sin(t * 2 + i) * 40 * intensity;
+      let x = p.cos(angle) * r;
+      let y = p.sin(angle) * r;
+      let size = 20 + p.sin(t * 3 + i * 0.5) * 15 * intensity;
+
+      p.fill((hue + i * 40) % 360, 80, 90, 80);
+      p.ellipse(x, y, size, size);
+
+      // Inner glow
+      p.fill((hue + i * 40 + 30) % 360, 60, 100, 40);
+      p.ellipse(x, y, size * 0.6, size * 0.6);
     }
   };
-
-  p.mousePressed = function() { dragging = true; lastX = p.mouseX; lastY = p.mouseY; };
-  p.mouseReleased = function() { dragging = false; };
-  p.mouseDragged = function() {
-    if (dragging) { rotY += (p.mouseX - lastX) * 0.01; rotX += (p.mouseY - lastY) * 0.01; lastX = p.mouseX; lastY = p.mouseY; }
-  };
-  p.mouseWheel = function(e) { camDist = p.constrain(camDist + e.delta * 0.5, 100, 2000); };
 }
 ---PARAMS---
-[{"name":"speed","min":0.001,"max":0.1,"default":0.01},{"name":"complexity","min":1,"max":15,"default":5},{"name":"intensity","min":0.5,"max":2,"default":1},{"name":"colorHue","min":0,"max":360,"default":180}]
+[{"name":"speed","min":0.005,"max":0.1,"default":0.02},{"name":"complexity","min":3,"max":20,"default":8},{"name":"intensity","min":0.3,"max":2,"default":1},{"name":"colorHue","min":0,"max":360,"default":200}]
 
 CRITICAL: Your response must start IMMEDIATELY with "function(p)" - no text before it, no markdown, no explanation. Just the raw code followed by ---PARAMS--- and the JSON array."""
 

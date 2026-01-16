@@ -7,9 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
   <script src="/static/sketch.js"></script>
-  <script src="/static/engine.js?v=19"></script>
-  <script src="/static/visual.js?v=10"></script>
-  <script src="/static/patcher.js?v=19"></script>
+  <script src="/static/engine.js?v=31"></script>
+  <script src="/static/visual.js?v=12"></script>
+  <script src="/static/patcher.js?v=31"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -72,6 +72,49 @@
       --space-2xl: 32px;
     }
 
+    /* Dark Theme */
+    body.dark {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --bg-elevated: #1c2128;
+      --bg-hover: #30363d;
+
+      /* Accent colors - slightly brighter for dark mode */
+      --accent-blue: #58a6ff;
+      --accent-green: #3fb950;
+      --accent-purple: #a371f7;
+      --accent-orange: #d29922;
+      --accent-red: #f85149;
+
+      /* Dark neutrals */
+      --neutral-900: #f0f6fc;
+      --neutral-800: #c9d1d9;
+      --neutral-700: #b1bac4;
+      --neutral-600: #8b949e;
+      --neutral-500: #6e7681;
+      --neutral-400: #484f58;
+      --neutral-300: #30363d;
+      --neutral-200: #21262d;
+      --neutral-100: #161b22;
+
+      /* Semantic colors */
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-tertiary: #6e7681;
+      --success: #3fb950;
+      --error: #f85149;
+      --warning: #d29922;
+
+      /* Borders & shadows */
+      --border-light: rgba(240, 246, 252, 0.1);
+      --border-medium: rgba(240, 246, 252, 0.2);
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+      --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.6);
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -80,7 +123,7 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #fafafa;
+      background: var(--bg-secondary);
       color: var(--text-primary);
       height: 100vh;
       width: 100vw;
@@ -99,52 +142,37 @@
       right: 0;
       bottom: 0;
       z-index: 0;
-      background: #fafafa;
+      background: var(--bg-secondary);
     }
 
     .patcher-fullscreen .patcher-area {
       width: 100%;
       height: 100%;
       position: relative;
-      background: #fafafa;
+      background: var(--bg-secondary);
     }
 
-    /* Left Sidebar - Floating Panel (Clean White) */
+    /* Left Sidebar - Floating Panel */
     .sidebar {
       position: fixed;
       top: 16px;
       left: 16px;
       width: 220px;
-      background: #ffffff;
+      background: var(--bg-elevated);
       border-radius: 12px;
       padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 0;
       z-index: 100;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-    }
-
-    /* Right Sidebar - Floating Panel (Clean White) */
-    .sidebar-right {
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      width: 260px;
-      height: 320px;
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      z-index: 100;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+      box-shadow: var(--shadow-xl);
+      border: 1px solid var(--border-light);
     }
 
     /* Minimal Panel Styles */
     .panel-section {
       padding: 12px 0;
-      border-bottom: 1px solid #eee;
+      border-bottom: 1px solid var(--border-light);
     }
     .panel-section:last-child {
       border-bottom: none;
@@ -160,21 +188,22 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: #666;
+      color: var(--text-secondary);
     }
     .input-minimal {
       width: 100%;
       padding: 8px 10px;
       font-size: 13px;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--border-medium);
       border-radius: 6px;
-      background: #fafafa;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
       margin-bottom: 8px;
     }
     .input-minimal:focus {
       outline: none;
-      border-color: #2563eb;
-      background: #fff;
+      border-color: var(--accent-blue);
+      background: var(--bg-elevated);
     }
     .btn-row {
       display: flex;
@@ -184,19 +213,20 @@
       padding: 8px 12px;
       font-size: 12px;
       font-weight: 500;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--border-medium);
       border-radius: 6px;
-      background: #fff;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
       cursor: pointer;
       transition: all 0.15s;
     }
     .btn-minimal:hover {
-      background: #f5f5f5;
-      border-color: #ccc;
+      background: var(--bg-hover);
+      border-color: var(--border-medium);
     }
     .btn-minimal.btn-primary {
-      background: #2563eb;
-      border-color: #2563eb;
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
       color: #fff;
     }
     .btn-minimal.btn-primary:hover {
@@ -206,13 +236,13 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #ccc;
+      background: var(--neutral-400);
       overflow: hidden;
       text-indent: -9999px;
       flex-shrink: 0;
     }
     .status-dot-small.active {
-      background: #22c55e;
+      background: var(--accent-green);
     }
 
     .brand {
@@ -942,8 +972,8 @@
   <!-- Floating Left Panel -->
   <aside class="sidebar">
     <div style="margin-bottom: 8px;">
-      <div style="font-size: 15px; font-weight: 600; color: #333;">HeadWave</div>
-      <div style="font-size: 11px; color: #999;">EEG · CV · OSC</div>
+      <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">HeadWave</div>
+      <div style="font-size: 11px; color: var(--text-tertiary);">EEG · CV · OSC</div>
     </div>
 
     <!-- Global Messages -->
@@ -985,7 +1015,7 @@
     </div>
 
     <!-- Camera -->
-    <div class="panel-section" style="border-bottom: none;">
+    <div class="panel-section">
       <div class="panel-header">
         <span class="panel-title">Camera</span>
         <span id="camera-pill" class="status-dot-small"></span>
@@ -993,6 +1023,14 @@
       <div class="btn-row">
         <button id="btn-camera-start" class="btn-minimal btn-primary" style="flex: 1;">Start</button>
         <button id="btn-camera-stop" class="btn-minimal">Stop</button>
+      </div>
+    </div>
+
+    <!-- Theme Toggle -->
+    <div class="panel-section" style="border-bottom: none; margin-top: auto;">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <span class="panel-title">Theme</span>
+        <button id="theme-toggle" class="btn-minimal" style="padding: 4px 10px; font-size: 11px;">Dark</button>
       </div>
     </div>
 
@@ -1068,19 +1106,6 @@
     </div>
   </div>
 
-  <!-- Right Sidebar: AI Assistant -->
-  <aside class="sidebar-right">
-    <div style="margin-bottom: 12px;">
-      <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #666;">AI Assistant</div>
-    </div>
-    <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
-      <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: 12px; padding: 12px; background: #fafafa; border-radius: 8px; border: 1px solid #eee; display: flex; flex-direction: column; gap: 8px;"></div>
-      <div style="display: flex; gap: 6px;">
-        <input id="chatInput" type="text" placeholder="Create a patch..." class="input-minimal" style="margin-bottom: 0;" />
-        <button id="chatSend" class="btn-minimal btn-primary">Send</button>
-      </div>
-    </div>
-  </aside>
 
   <script>
     // Stream configuration constants - optimized for real-time EEG visualization
@@ -1109,6 +1134,92 @@
     const visualTitle = document.getElementById("visual-title");
     const visualSubtitle = document.getElementById("visual-subtitle");
     const visualMeta = document.getElementById("visual-meta");
+
+    // -------- Theme Toggle --------
+    const themeToggle = document.getElementById("theme-toggle");
+
+    function setTheme(isDark) {
+      if (isDark) {
+        document.body.classList.add('dark');
+        themeToggle.textContent = 'Light';
+        localStorage.setItem('theme', 'dark');
+        // Update Patcher theme if available
+        if (typeof Patcher !== 'undefined' && Patcher.theme) {
+          Patcher.theme.bg = {
+            primary: '#0d1117',
+            secondary: '#161b22',
+            tertiary: '#21262d'
+          };
+          Patcher.theme.text = {
+            primary: '#e6edf3',
+            secondary: '#8b949e',
+            muted: '#6e7681'
+          };
+          Patcher.theme.port = {
+            input: '#58a6ff',
+            output: '#f97316',
+            hover: '#ffffff'
+          };
+          Patcher.theme.cable = {
+            default: '#58a6ff',
+            active: '#a371f7',
+            glow: 'rgba(88, 166, 255, 0.3)'
+          };
+          Patcher.theme.node = {
+            bg: '#1c2128',
+            bgSelected: '#21262d',
+            border: '#30363d',
+            borderSelected: '#58a6ff'
+          };
+          if (Patcher.redraw) Patcher.redraw();
+        }
+      } else {
+        document.body.classList.remove('dark');
+        themeToggle.textContent = 'Dark';
+        localStorage.setItem('theme', 'light');
+        // Reset Patcher theme if available
+        if (typeof Patcher !== 'undefined' && Patcher.theme) {
+          Patcher.theme.bg = {
+            primary: '#fafafa',
+            secondary: '#f0f0f0',
+            tertiary: '#e5e5e5'
+          };
+          Patcher.theme.text = {
+            primary: '#1a1a1a',
+            secondary: '#666666',
+            muted: '#999999'
+          };
+          Patcher.theme.port = {
+            input: '#2563eb',
+            output: '#f97316',
+            hover: '#000000'
+          };
+          Patcher.theme.cable = {
+            default: '#2563eb',
+            active: '#9333ea',
+            glow: 'rgba(37, 99, 235, 0.2)'
+          };
+          Patcher.theme.node = {
+            bg: '#ffffff',
+            bgSelected: '#f3f4f6',
+            border: '#e5e5e5',
+            borderSelected: '#2563eb'
+          };
+          if (Patcher.redraw) Patcher.redraw();
+        }
+      }
+    }
+
+    // Initialize theme from localStorage
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+      setTheme(true);
+    }
+
+    themeToggle.onclick = () => {
+      const isDark = document.body.classList.contains('dark');
+      setTheme(!isDark);
+    };
 
     function showError(message) {
       globalError.textContent = message;
@@ -2053,18 +2164,6 @@
       });
     }
 
-    // AI Assistant section collapse toggle (starts collapsed)
-    const aiHeader = document.getElementById('ai-section-header');
-    const aiContent = document.getElementById('ai-section-content');
-    const aiToggleIcon = document.getElementById('ai-toggle-icon');
-    if (aiHeader && aiContent && aiToggleIcon) {
-      aiHeader.addEventListener('click', () => {
-        const isVisible = aiContent.style.display !== 'none';
-        aiContent.style.display = isVisible ? 'none' : 'flex';
-        aiToggleIcon.textContent = isVisible ? '▶' : '▼';
-      });
-    }
-
     // CV Features section collapse toggle
     const cvFeaturesToggle = document.getElementById('cv-features-toggle');
     const cvFeaturesContent = document.getElementById('cv-features-content');
@@ -2100,69 +2199,6 @@
         recordingToggleIcon.textContent = isVisible ? '▶' : '▼';
       });
     }
-
-    // -------- AI Assistant Chat --------
-    const chatInput = document.getElementById("chatInput");
-    const chatSend = document.getElementById("chatSend");
-    const chatMessages = document.getElementById("chatMessages");
-
-    async function sendChatMessage() {
-      const message = chatInput.value.trim();
-      if (!message) return;
-
-      // Add user message to chat
-      const userMsg = document.createElement("div");
-      userMsg.style.cssText = "background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 8px; align-self: flex-end; max-width: 85%; font-size: 12px;";
-      userMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">YOU</div><div style="color: var(--text-primary); line-height: 1.4;">${message}</div>`;
-      chatMessages.appendChild(userMsg);
-      chatInput.value = "";
-
-      // Scroll to bottom
-      chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
-
-      // Show thinking indicator
-      const thinkingMsg = document.createElement("div");
-      thinkingMsg.id = "thinking-indicator";
-      thinkingMsg.style.cssText = "background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 8px; align-self: flex-start; max-width: 85%; font-size: 12px;";
-      thinkingMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">ASSISTANT</div><div style="color: var(--text-secondary); line-height: 1.4;">Thinking...</div>`;
-      chatMessages.appendChild(thinkingMsg);
-      chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
-
-      try {
-        const response = await fetch("/api/assistant/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
-        });
-        const data = await response.json();
-
-        // Remove thinking indicator
-        const thinking = document.getElementById("thinking-indicator");
-        if (thinking) thinking.remove();
-
-        // Add assistant response
-        const assistantMsg = document.createElement("div");
-        assistantMsg.style.cssText = "background: var(--text-primary); color: var(--bg-primary); border-radius: var(--radius-md); padding: 8px; align-self: flex-start; max-width: 85%; font-size: 12px;";
-        assistantMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; opacity: 0.7; margin-bottom: 4px;">ASSISTANT</div><div style="white-space: pre-wrap; line-height: 1.4;">${data.response || "Sorry, I couldn't generate a response."}</div>`;
-        chatMessages.appendChild(assistantMsg);
-        chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
-      } catch (error) {
-        // Remove thinking indicator
-        const thinking = document.getElementById("thinking-indicator");
-        if (thinking) thinking.remove();
-
-        const errorMsg = document.createElement("div");
-        errorMsg.style.cssText = "background: var(--bg-tertiary); border: 1px solid var(--border-medium); border-radius: var(--radius-md); padding: 8px; align-self: flex-start; max-width: 85%; font-size: 12px;";
-        errorMsg.innerHTML = `<div style="font-size: 10px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">ERROR</div><div style="color: var(--text-secondary); line-height: 1.4;">Failed to get response: ${error.message}</div>`;
-        chatMessages.appendChild(errorMsg);
-        chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
-      }
-    }
-
-    chatSend.onclick = sendChatMessage;
-    chatInput.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") sendChatMessage();
-    });
 
     // -------- p5.js Enhanced Sketch --------
     let p5Sketch = null;

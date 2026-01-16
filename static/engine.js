@@ -170,12 +170,48 @@ const AudioEngine = {
     scale: {
       name: 'Scale',
       category: 'modulator',
-      inputs: ['signal'],
-      outputs: ['signal'],
+      inputs: ['value'],
+      outputs: ['value'],
       params: {
-        min: { default: 200, min: 0, max: 20000 },
-        max: { default: 800, min: 0, max: 20000 }
+        inMin: { default: 0, min: -10000, max: 10000 },
+        inMax: { default: 1, min: -10000, max: 10000 },
+        outMin: { default: 0, min: -10000, max: 10000 },
+        outMax: { default: 1, min: -10000, max: 10000 }
       }
+    },
+
+    // ============ GENERATION ============
+    gen: {
+      name: 'Gen',
+      category: 'generation',
+      inputs: ['prompt'],  // Receives from prompt node, more inputs added dynamically for parameters
+      outputs: ['context'],  // Context output for iteration to next prompt
+      params: {
+        background: { default: '#0d1117', type: 'color' },
+        code: { default: '', type: 'code', hidden: true },
+        sourcePrompt: { default: '', type: 'text', hidden: true }
+      },
+      isCanvas: true  // This node renders p5.js visuals
+    },
+    prompt: {
+      name: 'Prompt',
+      category: 'generation',
+      inputs: ['context'],  // Input for previous generation context (iteration)
+      outputs: ['prompt'],
+      params: {
+        text: { default: '', type: 'text', inline: true, placeholder: 'Describe what to generate...' },
+        temperature: { default: 0.7, min: 0, max: 1 },
+        style: { default: '', type: 'text', placeholder: 'Style reference...' }
+      },
+      hasInlineInput: true  // Text is editable directly on node
+    },
+    parameters: {
+      name: 'Parameters',
+      category: 'generation',
+      inputs: [],  // Dynamically: one input per parameter for modulator connections
+      outputs: [],  // Dynamically: one output per parameter to connect to gen
+      params: {},   // Dynamically: sliders for each extracted parameter
+      isDynamic: true  // Flag indicating this node's ports/params are runtime-generated
     },
 
     // ============ VISUALS ============
@@ -298,6 +334,10 @@ const AudioEngine = {
   // Store for AI Canvas instances (isolated p5.js)
   aiCanvasInstances: {},
   aiCanvasCode: {},
+
+  // Store for Gen node canvas instances
+  genCanvasInstances: {},
+  genCanvasContainers: {},
 
   // Initialize the audio engine
   init: function() {
@@ -1490,9 +1530,12 @@ const AudioEngine = {
           const sourceNode = this.nodes[inputConn.fromNode];
           if (sourceNode) {
             const rawValue = this._getOutputValue(sourceNode, inputConn.fromOutput);
-            const min = node.params.min;
-            const max = node.params.max;
-            node.outputValue = min + rawValue * (max - min);
+            const { inMin, inMax, outMin, outMax } = node.params;
+            // Clamp input to range
+            const clampedValue = Math.max(inMin, Math.min(inMax, rawValue));
+            // Map from input range to output range
+            const normalized = (clampedValue - inMin) / (inMax - inMin);
+            node.outputValue = outMin + normalized * (outMax - outMin);
           }
         }
       }
@@ -1615,32 +1658,20 @@ const AudioEngine = {
   getConnectedVisualNodes: function() {
     const canvasNode = this.getCanvasNode();
     if (!canvasNode) {
-      console.log('[AudioEngine] No canvas/output node found');
       return [];
-    }
-
-    // Debug: log connections (throttled)
-    if (!this._lastConnLog || Date.now() - this._lastConnLog > 2000) {
-      console.log('[AudioEngine] Canvas/Output node:', canvasNode.id, canvasNode.type);
-      console.log('[AudioEngine] All connections:', this.connections);
-      this._lastConnLog = Date.now();
     }
 
     // Find all nodes connected to canvas/output (trace back through 'draw' or 'visual' connections)
     const connectedIds = new Set();
 
     const traceConnections = (nodeId) => {
-      // Find all connections where this node is the target
       for (const conn of this.connections) {
-        // Check for both 'draw' (canvas) and 'visual' (output) inputs
         if (conn.toNode === nodeId && (conn.toInput === 'draw' || conn.toInput === 'visual')) {
           const fromNode = this.nodes[conn.fromNode];
           if (fromNode) {
             const nodeType = this.nodeTypes[fromNode.type];
-            console.log('[AudioEngine] Found visual connection:', conn.fromNode, '->', conn.toNode, 'type:', fromNode.type, 'category:', nodeType?.category);
             if (nodeType && nodeType.category === 'visual') {
               connectedIds.add(conn.fromNode);
-              // Recursively trace (for transform nodes that chain)
               traceConnections(conn.fromNode);
             }
           }
@@ -2084,6 +2115,100 @@ const AudioEngine = {
     if (this.aiCanvasInstances[nodeId]) {
       this.aiCanvasInstances[nodeId].remove();
       delete this.aiCanvasInstances[nodeId];
+    }
+  },
+
+  // Execute Gen node code in an offscreen canvas
+  executeGenCanvas: function(nodeId, patcherNode, code) {
+    // Clean up existing instance
+    this.stopGenCanvas(nodeId);
+
+    // Create hidden container for p5
+    const container = document.createElement('div');
+    container.style.cssText = 'position: absolute; left: -9999px; top: -9999px; width: 200px; height: 150px;';
+    document.body.appendChild(container);
+    this.genCanvasContainers[nodeId] = container;
+
+    const self = this;
+
+    // Create wrapper that injects parameter access
+    const wrappedSketch = function(p) {
+      // Inject getParam function for dynamic parameter access
+      p.getParam = function(name) {
+        const n = self.nodes[nodeId];
+        if (n && n.params && name in n.params) {
+          return n.params[name];
+        }
+        return 0;
+      };
+
+      // Inject AudioEngine data access
+      p.getEEG = function(band) {
+        return self.data.bands[band] || 0;
+      };
+
+      // Execute the user's generated code
+      try {
+        const userSketch = new Function('p', `
+          return (${code})(p);
+        `);
+        userSketch(p);
+
+        // Override setup to ensure proper canvas size for node preview
+        const originalSetup = p.setup;
+        p.setup = function() {
+          // Call original setup first (it may create canvas with different size)
+          if (originalSetup) originalSetup.call(p);
+          // Resize to fit our node preview - this works for both 2D and WEBGL
+          if (p.canvas) {
+            p.resizeCanvas(200, 150);
+          } else {
+            p.createCanvas(200, 150);
+          }
+        };
+
+        // After each draw, update the reference for patcher to use
+        const originalDraw = p.draw;
+        p.draw = function() {
+          if (originalDraw) originalDraw.call(p);
+          // Store canvas reference on patcher node for rendering
+          if (patcherNode && p.canvas) {
+            patcherNode._p5Canvas = p.canvas;
+          }
+        };
+      } catch (err) {
+        console.error('Gen Canvas execution error:', err);
+        p.setup = function() {
+          p.createCanvas(200, 150);
+          p.background(20);
+          p.fill(255, 100, 100);
+          p.textAlign(p.CENTER);
+          p.textSize(10);
+          p.text('Error in code', p.width/2, p.height/2);
+        };
+        p.draw = function() {
+          // Store canvas reference even for error state
+          if (patcherNode && p.canvas) {
+            patcherNode._p5Canvas = p.canvas;
+          }
+        };
+      }
+    };
+
+    // Create p5 instance
+    this.genCanvasInstances[nodeId] = new p5(wrappedSketch, container);
+    return this.genCanvasInstances[nodeId];
+  },
+
+  // Stop and remove Gen Canvas instance
+  stopGenCanvas: function(nodeId) {
+    if (this.genCanvasInstances[nodeId]) {
+      this.genCanvasInstances[nodeId].remove();
+      delete this.genCanvasInstances[nodeId];
+    }
+    if (this.genCanvasContainers[nodeId]) {
+      this.genCanvasContainers[nodeId].remove();
+      delete this.genCanvasContainers[nodeId];
     }
   },
 

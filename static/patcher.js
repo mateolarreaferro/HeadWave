@@ -60,7 +60,8 @@ const Patcher = {
       visual: '#db2777',      // Pink (darker)
       visual_output: '#e11d48', // Rose (darker)
       sender: '#dc2626',      // Red (darker)
-      visualization: '#0d9488' // Teal (darker)
+      visualization: '#0d9488', // Teal (darker)
+      generation: '#8b5cf6'   // Violet - for gen, prompt, parameters nodes
     },
     text: {
       primary: '#1a1a1a',
@@ -355,15 +356,240 @@ const Patcher = {
 
     if (AudioEngine.connect(fromNodeId, fromPort, toNodeId, toPort)) {
       this.cables.push({ fromNode: fromNodeId, fromPort, toNode: toNodeId, toPort });
+
+      // Check if this is a prompt → gen connection
+      const fromNode = this.nodes.find(n => n.id === fromNodeId);
+      const toNode = this.nodes.find(n => n.id === toNodeId);
+      console.log('[Cable] Connection made:', fromNode?.type, fromPort, '->', toNode?.type, toPort);
+      if (fromNode?.type === 'prompt' && toNode?.type === 'gen' && fromPort === 'prompt') {
+        console.log('[Cable] Triggering generation from cable connection');
+        this._triggerGeneration(fromNode, toNode);
+      }
+
       return true;
     }
     return false;
   },
 
+  // Trigger LLM generation when prompt connects to gen
+  _triggerGeneration: async function(promptNode, genNode) {
+    console.log('[Generation] _triggerGeneration called', { promptNode, genNode });
+    const promptText = promptNode.params.text;
+    const style = promptNode.params.style;
+    const temperature = promptNode.params.temperature;
+    console.log('[Generation] promptText:', promptText, 'style:', style, 'temp:', temperature);
+
+    if (!promptText || promptText.trim() === '') {
+      console.log('[Generation] No prompt text, skipping generation');
+      return;
+    }
+
+    // Check if prompt has a context input from a previous generation
+    let previousContext = null;
+    const contextCable = this.cables.find(c => c.toNode === promptNode.id && c.toPort === 'context');
+    if (contextCable) {
+      const prevGenNode = this.nodes.find(n => n.id === contextCable.fromNode);
+      if (prevGenNode && prevGenNode.type === 'gen' && prevGenNode.params.code) {
+        previousContext = {
+          code: prevGenNode.params.code,
+          prompt: prevGenNode.params.sourcePrompt
+        };
+      }
+    }
+
+    // Store the prompt in the gen node
+    genNode.params.sourcePrompt = promptText;
+
+    // Show generating state
+    genNode._isGenerating = true;
+    this.render();
+
+    try {
+      // Build the full prompt with context if iterating
+      let fullPrompt = promptText;
+      if (style) fullPrompt += ` Style: ${style}`;
+      if (previousContext) {
+        fullPrompt = `ITERATION REQUEST: Modify the previous generation based on this request: "${promptText}"${style ? ` Style: ${style}` : ''}\n\nPrevious prompt: "${previousContext.prompt}"\n\nPrevious code to modify:\n${previousContext.code}`;
+      }
+
+      // Generate visual code
+      console.log('[Generation] Sending fetch to /api/ai/generate-visual with prompt:', fullPrompt);
+      const response = await fetch('/api/ai/generate-visual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          temperature: temperature
+        })
+      });
+      console.log('[Generation] Fetch response received:', response.status);
+
+      const result = await response.json();
+      console.log('[Generation] Parsed result:', result);
+      if (result.status === 'ok' && result.code) {
+        genNode.params.code = result.code;
+
+        // Initialize the p5 canvas for this gen node
+        AudioEngine.executeGenCanvas(genNode.id, genNode, result.code);
+
+        // Extract parameters from the generated code
+        const extractResponse = await fetch('/api/ai/extract-parameters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: result.code })
+        });
+
+        const extractResult = await extractResponse.json();
+        if (extractResult.status === 'ok' && extractResult.parameters) {
+          // Create or update parameters node
+          this._createParametersNode(genNode, extractResult.parameters);
+        }
+
+        // Update AudioEngine node with the generated code
+        const audioNode = AudioEngine.nodes[genNode.id];
+        if (audioNode) {
+          audioNode.code = result.code;
+          audioNode.params.code = result.code;
+        }
+      }
+    } catch (error) {
+      console.error('[Generation] Generation failed:', error);
+      console.error('[Generation] Error stack:', error.stack);
+    } finally {
+      console.log('[Generation] Finally block - setting _isGenerating to false');
+      genNode._isGenerating = false;
+      this.render();
+    }
+  },
+
+  // Create a parameters node with extracted parameters
+  _createParametersNode: function(genNode, parameters) {
+    // Position the parameters node to the left of the gen node
+    const paramsNode = this.addNode('parameters', genNode.x - 200, genNode.y);
+    if (!paramsNode) return;
+
+    // Parameters node has INPUT ports for modulators (EEG, LFO, etc)
+    // No output ports - it directly modifies the linked gen node
+    paramsNode.inputs = [];
+    paramsNode.outputs = [];
+    paramsNode.params = {};
+
+    for (const param of parameters) {
+      const paramName = param.name || param;
+      const paramMin = param.min ?? 0;
+      const paramMax = param.max ?? 1;
+      const paramDefault = param.default ?? (paramMin + paramMax) / 2;
+
+      // Add input port for modulator connections
+      paramsNode.inputs.push(paramName);
+      // Store slider parameter with default
+      paramsNode.params[paramName] = paramDefault;
+      // Also set on the gen node
+      genNode.params[paramName] = paramDefault;
+    }
+
+    // Store parameter metadata and link to gen node
+    paramsNode._parameterMeta = parameters;
+    paramsNode._linkedGenNode = genNode.id;
+
+    this.render();
+  },
+
+  // Create a Generation Object from selected nodes (prompt + gen + optionally parameters)
+  _createGenerationObject: function() {
+    if (this.selectedNodes.size < 2) return;
+
+    // Find the selected nodes by type
+    let promptNode = null;
+    let genNode = null;
+    let paramsNode = null;
+
+    for (const nodeId of this.selectedNodes) {
+      const node = this.nodes.find(n => n.id === nodeId);
+      if (!node) continue;
+      if (node.type === 'prompt') promptNode = node;
+      else if (node.type === 'gen') genNode = node;
+      else if (node.type === 'parameters') paramsNode = node;
+    }
+
+    if (!promptNode || !genNode) {
+      console.warn('Cannot create Generation Object: need prompt and gen nodes');
+      return;
+    }
+
+    // Create the Generation Object data structure
+    const generationObject = {
+      id: 'genobj_' + Date.now(),
+      promptNodeId: promptNode.id,
+      genNodeId: genNode.id,
+      parametersNodeId: paramsNode?.id || null,
+      parameterValues: paramsNode ? { ...paramsNode.params } : {},
+      parentGenerationId: null,
+      iterationNumber: 0,
+      prompt: promptNode.params.text,
+      code: genNode.params.code
+    };
+
+    // Store the generation object
+    if (!this.generationObjects) {
+      this.generationObjects = [];
+    }
+    this.generationObjects.push(generationObject);
+
+    // Mark nodes as grouped
+    promptNode._generationObjectId = generationObject.id;
+    genNode._generationObjectId = generationObject.id;
+    if (paramsNode) {
+      paramsNode._generationObjectId = generationObject.id;
+    }
+
+    // Visual feedback: add a group border around the nodes
+    this._updateGenerationObjectBounds(generationObject);
+
+    console.log('Created Generation Object:', generationObject);
+    this.render();
+  },
+
+  // Calculate bounds for a generation object group
+  _updateGenerationObjectBounds: function(genObj) {
+    const nodeIds = [genObj.promptNodeId, genObj.genNodeId, genObj.parametersNodeId].filter(Boolean);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const nodeId of nodeIds) {
+      const node = this.nodes.find(n => n.id === nodeId);
+      if (!node) continue;
+      const dim = this.getNodeDimensions(node);
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x + dim.width);
+      maxY = Math.max(maxY, node.y + dim.height);
+    }
+
+    genObj.bounds = {
+      x: minX - 20,
+      y: minY - 30,
+      width: maxX - minX + 40,
+      height: maxY - minY + 50
+    };
+  },
+
   // Get node dimensions based on type
   getNodeDimensions: function(node) {
+    // Gen node - canvas for rendering visuals
+    if (node.type === 'gen') {
+      return { width: 280, height: 200 };
+    }
+    // Prompt node - inline text input
+    else if (node.type === 'prompt') {
+      return { width: 240, height: 80 };
+    }
+    // Parameters node - dynamic based on number of parameters
+    else if (node.type === 'parameters') {
+      const numParams = Object.keys(node.params || {}).length;
+      return { width: 180, height: Math.max(100, 60 + numParams * 24) };
+    }
     // AI Canvas - width based on number of inputs
-    if (node.type === 'aiCanvas') {
+    else if (node.type === 'aiCanvas') {
       const numInputs = (node.inputs || []).length;
       // Each input needs ~110px for label, minimum 200px
       const width = Math.max(200, numInputs * 110);
@@ -514,6 +740,20 @@ const Patcher = {
     // Check node click
     const node = this.getNodeAt(pos.x, pos.y);
     if (node) {
+      // For prompt nodes, check if click is in the text input area
+      if (node.type === 'prompt' && !shiftKey) {
+        const dim = this.getNodeDimensions(node);
+        const inputY = node.y + this.headerHeight + 4;
+        const inputH = dim.height - this.headerHeight - 12;
+        // If click is in the input area (below header), show inline input
+        if (pos.y > inputY && pos.y < inputY + inputH) {
+          this.selectedNode = node.id;
+          this.selectedNodes.add(node.id);
+          this.showPromptInput(node);
+          return;
+        }
+      }
+
       if (shiftKey) {
         // Shift+click: toggle multi-selection
         this.toggleNodeSelection(node.id);
@@ -658,10 +898,108 @@ const Patcher = {
         if (typeof VisualRenderer !== 'undefined') {
           VisualRenderer.enterFullscreen();
         }
-      } else {
+      }
+      // For prompt nodes, show inline text input
+      else if (node.type === 'prompt') {
+        this.showPromptInput(node);
+      }
+      // For gen nodes, open fullscreen if visual is ready
+      else if (node.type === 'gen' && node.params.code) {
+        // TODO: implement fullscreen for gen node visuals
+        this.showParamsDialog(node);
+      }
+      else {
         this.showParamsDialog(node);
       }
     }
+  },
+
+  // Show inline text input for prompt node
+  showPromptInput: function(node) {
+    // Remove any existing prompt input
+    document.querySelectorAll('.prompt-inline-input').forEach(el => el.remove());
+
+    const dim = this.getNodeDimensions(node);
+    const canvasRect = this.canvas.getBoundingClientRect();
+
+    // Calculate position accounting for zoom and pan
+    const screenX = canvasRect.left + (node.x + 8) * this.zoom + this.panOffset.x;
+    const screenY = canvasRect.top + (node.y + this.headerHeight + 4) * this.zoom + this.panOffset.y;
+    const inputW = (dim.width - 16) * this.zoom;
+    const inputH = (dim.height - this.headerHeight - 12) * this.zoom;
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'prompt-inline-input';
+    textarea.value = node.params.text || '';
+    textarea.placeholder = 'Describe what to generate...';
+    textarea.style.cssText = `
+      position: fixed;
+      left: ${screenX}px;
+      top: ${screenY}px;
+      width: ${inputW}px;
+      height: ${inputH}px;
+      font-family: -apple-system, system-ui, sans-serif;
+      font-size: ${11 * this.zoom}px;
+      padding: ${6 * this.zoom}px;
+      border: 2px solid ${this.theme.accent.generation};
+      border-radius: ${4 * this.zoom}px;
+      background: ${this.theme.bg.primary};
+      color: ${this.theme.text.primary};
+      resize: none;
+      outline: none;
+      z-index: 10001;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const self = this;
+
+    // Handle blur - save and potentially trigger generation
+    const handleDone = () => {
+      console.log('[Prompt] handleDone called');
+      const newText = textarea.value.trim();
+      const oldText = node.params.text || '';
+      console.log('[Prompt] newText:', newText, 'oldText:', oldText);
+
+      // Update the node params
+      node.params.text = newText;
+      AudioEngine.setParam(node.id, 'text', newText);
+
+      textarea.remove();
+      self.render();
+
+      // If text changed and connected to a gen node, trigger generation
+      console.log('[Prompt] Checking if should trigger - newText:', newText, 'changed:', newText !== oldText);
+      if (newText && newText !== oldText) {
+        const cable = self.cables.find(c => c.fromNode === node.id && c.fromPort === 'prompt');
+        console.log('[Prompt] Found cable:', cable);
+        if (cable) {
+          const genNode = self.nodes.find(n => n.id === cable.toNode);
+          console.log('[Prompt] Found genNode:', genNode);
+          if (genNode && genNode.type === 'gen') {
+            console.log('[Prompt] Calling _triggerGeneration');
+            self._triggerGeneration(node, genNode);
+          }
+        }
+      }
+    };
+
+    textarea.addEventListener('blur', handleDone);
+    textarea.addEventListener('keydown', (e) => {
+      // Cmd/Ctrl+Enter to submit
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        textarea.blur();
+      }
+      // Escape to cancel
+      if (e.key === 'Escape') {
+        textarea.value = node.params.text || '';
+        textarea.blur();
+      }
+    });
   },
 
   // Context menu
@@ -696,10 +1034,28 @@ const Patcher = {
     `;
 
     if (node) {
-      menu.innerHTML = `
-        <div style="${menuItemStyle}" class="menu-item" data-action="params">Edit Parameters</div>
-        <div style="${menuItemDangerStyle}" class="menu-item" data-action="delete">Delete Node</div>
-      `;
+      // Check if multiple nodes are selected (for grouping)
+      if (this.selectedNodes.size > 1 && this.selectedNodes.has(node.id)) {
+        const selectedTypes = Array.from(this.selectedNodes).map(id => {
+          const n = this.nodes.find(nd => nd.id === id);
+          return n?.type;
+        });
+        const hasPrompt = selectedTypes.includes('prompt');
+        const hasGen = selectedTypes.includes('gen');
+        const hasParams = selectedTypes.includes('parameters');
+        const isGenerationGroup = hasPrompt && hasGen;
+
+        menu.innerHTML = `
+          <div style="${menuItemStyle}" class="menu-item" data-action="params">Edit Parameters</div>
+          ${isGenerationGroup ? `<div style="${menuItemStyle}" class="menu-item" data-action="group-generation">Group as Generation Object</div>` : ''}
+          <div style="${menuItemDangerStyle}" class="menu-item" data-action="delete-selected">Delete Selected (${this.selectedNodes.size})</div>
+        `;
+      } else {
+        menu.innerHTML = `
+          <div style="${menuItemStyle}" class="menu-item" data-action="params">Edit Parameters</div>
+          <div style="${menuItemDangerStyle}" class="menu-item" data-action="delete">Delete Node</div>
+        `;
+      }
     } else if (cable) {
       menu.innerHTML = `
         <div style="${menuItemDangerStyle}" class="menu-item" data-action="delete-cable">Delete Cable</div>
@@ -707,52 +1063,22 @@ const Patcher = {
       menu._cable = cable;
     } else {
       const categories = {
-        'Audio': {
-          icon: '♪', color: this.theme.accent.source,
+        'Generation': {
+          icon: '✨', color: this.theme.accent.generation,
           items: [
-            { type: 'toneGenerator', icon: '〜', desc: 'Oscillator + Noise' },
-            { type: 'sampler', icon: '▶', desc: 'Sample player' },
-            { type: 'filter', icon: '◇', desc: 'LPF/HPF/BPF' },
-            { type: 'effects', icon: '◌', desc: 'Delay/Reverb/Chorus' }
+            { type: 'prompt', icon: '💬', desc: 'Prompt for LLM generation' },
+            { type: 'gen', icon: '◈', desc: 'Visual/Audio generator' }
           ]
         },
         'Modulators': {
           icon: '◉', color: this.theme.accent.modulator,
           items: [
+            { type: 'eeg', icon: '◉', desc: 'EEG (bands/time/fft)' },
             { type: 'face', icon: '◎', desc: 'Face tracking CV' },
             { type: 'hands', icon: '✋', desc: 'Hand tracking CV' },
-            { type: 'eeg', icon: '◉', desc: 'EEG (bands/time/fft)' },
             { type: 'eyes', icon: '⊙', desc: 'Gaze tracking' },
             { type: 'lfo', icon: '∿', desc: 'Low freq oscillator' },
             { type: 'scale', icon: '↔', desc: 'Map range' }
-          ]
-        },
-        'Visuals': {
-          icon: '●', color: this.theme.accent.visual,
-          items: [
-            { type: 'aiCanvas', icon: '✨', desc: 'AI-generated visual' },
-            { type: 'ellipse', icon: '●', desc: 'Ellipse' },
-            { type: 'rect', icon: '■', desc: 'Rectangle' }
-          ]
-        },
-        'Senders': {
-          icon: '↗', color: this.theme.accent.sender,
-          items: [
-            { type: 'midi', icon: '♪', desc: 'MIDI CC/Note' },
-            { type: 'osc', icon: '○', desc: 'OSC sender' }
-          ]
-        },
-        'Visualizers': {
-          icon: '◐', color: this.theme.accent.visualization,
-          items: [
-            { type: 'eegViz', icon: '▥', desc: 'EEG visualizer' },
-            { type: 'cvViz', icon: '◎', desc: 'Camera + CV overlay' }
-          ]
-        },
-        'Output': {
-          icon: '◈', color: this.theme.accent.output,
-          items: [
-            { type: 'output', icon: '◈', desc: 'Audio + Visual output' }
           ]
         }
       };
@@ -804,10 +1130,14 @@ const Patcher = {
           this.addNode(item.dataset.type, menu._pos.x, menu._pos.y);
         } else if (action === 'delete' && node) {
           this.removeNode(node.id);
+        } else if (action === 'delete-selected') {
+          this.deleteSelectedNodes();
         } else if (action === 'delete-cable' && menu._cable) {
           this.removeCable(menu._cable);
         } else if (action === 'params' && node) {
           this.showParamsDialog(node);
+        } else if (action === 'group-generation') {
+          this._createGenerationObject();
         }
         document.querySelectorAll('.patcher-menu').forEach(m => m.remove());
       } else if (category && menu._categories) {
@@ -991,6 +1321,7 @@ const Patcher = {
 
       for (const [param, config] of Object.entries(nodeType.params)) {
         if (!visibleParams.includes(param)) continue;
+        if (config.hidden) continue;  // Skip hidden parameters (like code, sourcePrompt)
 
         const value = node.params[param];
         const displayName = param.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
@@ -1013,6 +1344,16 @@ const Patcher = {
               <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}</label>
               <input type="text" data-param="${param}" value="${value || ''}" placeholder="${config.placeholder || ''}"
                 style="width: 100%; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+          `;
+        }
+        // Textarea (for prompts)
+        else if (config.type === 'textarea') {
+          html += `
+            <div style="margin-bottom: 14px;" data-param-container="${param}">
+              <label style="display: block; color: ${this.theme.text.secondary}; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}</label>
+              <textarea data-param="${param}" placeholder="${config.placeholder || ''}"
+                style="width: 100%; min-height: 80px; padding: 10px 12px; background: ${this.theme.bg.primary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-size: 14px; box-sizing: border-box; resize: vertical; font-family: inherit;">${value || ''}</textarea>
             </div>
           `;
         }
@@ -1138,8 +1479,8 @@ const Patcher = {
         `;
       });
 
-      // Handle changes for standard inputs
-      dialog.querySelectorAll('input[data-param], select[data-param]').forEach(el => {
+      // Handle changes for standard inputs (including textarea)
+      dialog.querySelectorAll('input[data-param], select[data-param], textarea[data-param]').forEach(el => {
         const param = el.dataset.param;
 
         // Skip color text inputs (handled separately)
@@ -1153,6 +1494,15 @@ const Patcher = {
 
           node.params[param] = value;
           AudioEngine.setParam(node.id, param, value);
+
+          // If this is a parameters node, also update the linked gen node
+          if (node._linkedGenNode) {
+            const genNode = self.nodes.find(n => n.id === node._linkedGenNode);
+            if (genNode) {
+              genNode.params[param] = value;
+              AudioEngine.setParam(genNode.id, param, value);
+            }
+          }
 
           const valEl = document.getElementById(`val-${param}`);
           if (valEl) valEl.textContent = typeof value === 'number' ? value.toFixed(2) : value;
@@ -1570,6 +1920,30 @@ const Patcher = {
       }
     }
 
+    // Generation Object group boundaries (draw behind nodes)
+    if (this.generationObjects) {
+      for (const genObj of this.generationObjects) {
+        this._updateGenerationObjectBounds(genObj);
+        if (genObj.bounds) {
+          const b = genObj.bounds;
+          ctx.strokeStyle = this.theme.accent.generation + '60';
+          ctx.lineWidth = 2 / this.zoom;
+          ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
+          ctx.beginPath();
+          ctx.roundRect(b.x, b.y, b.width, b.height, 12 / this.zoom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Label at top
+          ctx.font = `bold ${11 / this.zoom}px -apple-system, system-ui, sans-serif`;
+          ctx.fillStyle = this.theme.accent.generation;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`Generation #${genObj.iterationNumber}`, b.x + 8, b.y - 4);
+        }
+      }
+    }
+
     // Nodes
     for (const node of this.nodes) {
       this.drawNode(node);
@@ -1823,6 +2197,116 @@ const Patcher = {
       ctx.font = '9px -apple-system, system-ui, sans-serif';
       ctx.fillText('Double-click for fullscreen', x + w/2, y + h - 8);
       ctx.textAlign = 'left';
+    }
+    // Gen node - canvas for rendering generated visuals
+    else if (node.type === 'gen') {
+      const previewX = x + 8;
+      const previewY = y + hh + 8;
+      const previewW = w - 16;
+      const previewH = h - hh - 16;
+
+      // Draw preview background
+      ctx.fillStyle = node.params.background || '#0d1117';
+      ctx.beginPath();
+      ctx.roundRect(previewX, previewY, previewW, previewH, 6);
+      ctx.fill();
+
+      // Check if generating
+      if (node._isGenerating) {
+        ctx.fillStyle = accentColor;
+        ctx.font = 'bold 12px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Generating...', x + w/2, previewY + previewH/2);
+        ctx.textAlign = 'left';
+      }
+      // Check if code is generated - render the visual
+      else if (node.params.code) {
+        // Render the embedded p5 canvas if it exists
+        if (node._p5Canvas) {
+          ctx.drawImage(node._p5Canvas, previewX, previewY, previewW, previewH);
+        } else {
+          // Show active indicator while p5 initializes
+          ctx.fillStyle = '#22c55e';
+          ctx.font = 'bold 11px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Visual Ready', x + w/2, previewY + previewH/2 - 8);
+
+          // Show truncated prompt
+          ctx.fillStyle = this.theme.text.muted;
+          ctx.font = '9px -apple-system, system-ui, sans-serif';
+          const prompt = node.params.sourcePrompt || '';
+          const truncPrompt = prompt.length > 30 ? prompt.slice(0, 27) + '...' : prompt;
+          ctx.fillText(`"${truncPrompt}"`, x + w/2, previewY + previewH/2 + 10);
+          ctx.textAlign = 'left';
+        }
+      } else {
+        // Empty state
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.font = '11px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Connect prompt to generate', x + w/2, previewY + previewH/2);
+        ctx.textAlign = 'left';
+      }
+    }
+    // Prompt node - inline text input
+    else if (node.type === 'prompt') {
+      const inputX = x + 8;
+      const inputY = y + hh + 4;
+      const inputW = w - 16;
+      const inputH = h - hh - 12;
+
+      // Draw input background
+      ctx.fillStyle = this.theme.bg.primary;
+      ctx.strokeStyle = this.theme.node.border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(inputX, inputY, inputW, inputH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      // Draw prompt text or placeholder
+      const promptText = node.params.text || '';
+      ctx.font = '11px -apple-system, system-ui, sans-serif';
+      ctx.textBaseline = 'top';
+
+      if (promptText) {
+        ctx.fillStyle = this.theme.text.primary;
+        // Word wrap the text
+        const words = promptText.split(' ');
+        let line = '';
+        let lineY = inputY + 6;
+        const maxWidth = inputW - 12;
+
+        for (const word of words) {
+          const testLine = line + word + ' ';
+          const metrics = ctx.measureText(testLine);
+          if (metrics.width > maxWidth && line) {
+            ctx.fillText(line.trim(), inputX + 6, lineY);
+            line = word + ' ';
+            lineY += 14;
+            if (lineY > inputY + inputH - 10) break;
+          } else {
+            line = testLine;
+          }
+        }
+        if (lineY <= inputY + inputH - 10) {
+          ctx.fillText(line.trim(), inputX + 6, lineY);
+        }
+      } else {
+        ctx.fillStyle = this.theme.text.muted;
+        ctx.fillText('Click to type prompt...', inputX + 6, inputY + 6);
+      }
+      ctx.textBaseline = 'middle';
+
+      // Show context indicator if connected to previous gen
+      const hasContext = this.cables.some(c => c.toNode === node.id && c.toPort === 'context');
+      if (hasContext) {
+        ctx.fillStyle = accentColor;
+        ctx.font = '9px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('iterating', x + w - 10, y + 14);
+        ctx.textAlign = 'left';
+      }
     }
     // EEG Visualizer - unified bands/timeseries/fft display
     else if (node.type === 'eegViz') {
@@ -2342,7 +2826,7 @@ const Patcher = {
 
       // Value bar (normalized for display)
       let normalizedValue = node.type === 'scale'
-        ? (liveValue - node.params.min) / (node.params.max - node.params.min)
+        ? (liveValue - node.params.outMin) / (node.params.outMax - node.params.outMin)
         : liveValue;
       normalizedValue = Math.max(0, Math.min(1, normalizedValue));
 
@@ -2394,12 +2878,13 @@ const Patcher = {
     ctx.fillStyle = this.theme.bg.primary;
     ctx.fill();
 
-    // Label
+    // Label - truncate if too long
     ctx.fillStyle = this.theme.text.muted;
-    ctx.font = '10px -apple-system, system-ui, sans-serif';
+    ctx.font = '9px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = isInput ? 'bottom' : 'top';
-    ctx.fillText(label, x, isInput ? y - r - 4 : y + r + 4);
+    const truncLabel = label.length > 8 ? label.slice(0, 6) + '..' : label;
+    ctx.fillText(truncLabel, x, isInput ? y - r - 4 : y + r + 4);
   },
 
   // Draw cable
