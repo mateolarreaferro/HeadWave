@@ -14,6 +14,37 @@ const VisualRenderer = {
   aiCanvasInitialized: {},
   aiCanvasDrawFunctions: {},
 
+  // Error tracking for graceful degradation
+  _errorCounts: {},
+  _maxErrorsBeforeFallback: 3,
+  _fallbackActive: {},
+
+  // Performance tracking
+  _frameTime: 0,
+  _lastFrameTime: 0,
+
+  // Fallback sketch for error recovery
+  _fallbackSketch: function(p) {
+    let t = 0;
+    p.setup = function() {
+      p.createCanvas(400, 400);
+      p.colorMode(p.HSB, 360, 100, 100, 100);
+      p.noStroke();
+    };
+    p.draw = function() {
+      let intensity = p.getParam ? (p.getParam('intensity') || 0.5) : 0.5;
+      p.background(220, 20, 10);
+      t += 0.02;
+      p.translate(p.width/2, p.height/2);
+      for (let i = 0; i < 5; i++) {
+        let r = 50 + i * 30 + p.sin(t + i * 0.5) * 20 * intensity;
+        let alpha = 60 - i * 10;
+        p.fill(200 + i * 20, 50, 80, alpha);
+        p.ellipse(0, 0, r * 2, r * 2);
+      }
+    };
+  },
+
   init: function(previewContainerId) {
     this.previewContainer = document.getElementById(previewContainerId);
     if (!this.previewContainer) {
@@ -443,6 +474,9 @@ const VisualRenderer = {
       }
     }
 
+    // Track frame time for graceful degradation
+    const frameStart = performance.now();
+
     // Run the draw function each frame
     if (this.aiCanvasDrawFunctions[nodeId]) {
       try {
@@ -457,12 +491,31 @@ const VisualRenderer = {
         };
 
         this.aiCanvasDrawFunctions[nodeId].call(p);
+
+        // Reset error count on successful frame
+        if (this._errorCounts[nodeId]) {
+          this._errorCounts[nodeId] = Math.max(0, this._errorCounts[nodeId] - 0.1);
+        }
+
+        // Track frame time and apply graceful degradation
+        this._frameTime = performance.now() - frameStart;
+        this._applyGracefulDegradation(nodeId, this._frameTime);
+
       } catch (err) {
         console.error('AI Canvas draw error:', err);
-        p.fill(255, 100, 100);
-        p.textAlign(p.CENTER, p.CENTER);
-        p.textSize(14);
-        p.text('Draw Error: ' + err.message, p.width / 2, p.height / 2);
+
+        // Track errors
+        this._errorCounts[nodeId] = (this._errorCounts[nodeId] || 0) + 1;
+
+        // If too many errors, load fallback sketch
+        if (this._errorCounts[nodeId] >= this._maxErrorsBeforeFallback) {
+          this._loadFallbackSketch(nodeId, p);
+        } else {
+          p.fill(255, 100, 100);
+          p.textAlign(p.CENTER, p.CENTER);
+          p.textSize(14);
+          p.text('Draw Error: ' + err.message, p.width / 2, p.height / 2);
+        }
       }
     } else {
       // No draw function captured - show fallback
@@ -470,6 +523,43 @@ const VisualRenderer = {
       p.textAlign(p.CENTER, p.CENTER);
       p.textSize(14);
       p.text('No draw function captured', p.width / 2, p.height / 2);
+    }
+  },
+
+  // Load fallback sketch when too many errors occur
+  _loadFallbackSketch: function(nodeId, p) {
+    if (this._fallbackActive[nodeId]) return;
+
+    console.log('[VisualRenderer] Loading fallback sketch for node:', nodeId);
+    this._fallbackActive[nodeId] = true;
+
+    // Replace the draw function with fallback
+    const fallbackDraw = () => {
+      p.background(220, 20, 10);
+      const t = p.frameCount * 0.02;
+      p.translate(p.width/2, p.height/2);
+      p.noStroke();
+      for (let i = 0; i < 5; i++) {
+        const r = 50 + i * 30 + p.sin(t + i * 0.5) * 20 * 0.5;
+        const alpha = 60 - i * 10;
+        p.fill(200 + i * 20, 50, 80, alpha);
+        p.ellipse(0, 0, r * 2, r * 2);
+      }
+    };
+
+    this.aiCanvasDrawFunctions[nodeId] = fallbackDraw;
+  },
+
+  // Graceful degradation: reduce complexity when frame time is too high
+  _applyGracefulDegradation: function(nodeId, frameTime) {
+    // Target 60fps = 16.67ms per frame, allow up to 33ms (30fps)
+    if (frameTime > 33) {
+      const node = AudioEngine?.nodes?.[nodeId];
+      if (node?.params?.complexity !== undefined) {
+        // Reduce complexity by 20%
+        node.params.complexity = Math.max(1, node.params.complexity * 0.8);
+        console.log('[VisualRenderer] Reducing complexity for performance:', node.params.complexity);
+      }
     }
   },
 

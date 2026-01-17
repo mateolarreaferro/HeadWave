@@ -2287,6 +2287,97 @@ const AudioEngine = {
   }
 };
 
+// ============ PARAMETER MANAGER (Debounced Updates) ============
+const ParameterManager = {
+  _queue: {},
+  _flushScheduled: false,
+  _lastFlush: 0,
+  _flushInterval: 16,  // ~60fps
+
+  /**
+   * Queue a parameter update - will be batched and applied at 60fps
+   */
+  queueUpdate: function(nodeId, param, value) {
+    if (!this._queue[nodeId]) {
+      this._queue[nodeId] = {};
+    }
+    this._queue[nodeId][param] = value;
+    this._scheduleFlush();
+  },
+
+  _scheduleFlush: function() {
+    if (this._flushScheduled) return;
+    this._flushScheduled = true;
+
+    const now = performance.now();
+    const elapsed = now - this._lastFlush;
+    const delay = Math.max(0, this._flushInterval - elapsed);
+
+    setTimeout(() => this._flush(), delay);
+  },
+
+  _flush: function() {
+    this._flushScheduled = false;
+    this._lastFlush = performance.now();
+
+    // Apply all queued updates
+    for (const [nodeId, params] of Object.entries(this._queue)) {
+      for (const [param, value] of Object.entries(params)) {
+        AudioEngine.setParam(nodeId, param, value);
+      }
+    }
+    this._queue = {};
+  }
+};
+
+// ============ FPS TRACKER & ADAPTIVE RATE ============
+const FPSTracker = {
+  _frameTimes: [],
+  _maxSamples: 30,
+  _currentFPS: 60,
+  _wsUpdateRate: 10,  // Default: 10Hz
+
+  /**
+   * Record a frame time and calculate current FPS
+   */
+  recordFrame: function() {
+    const now = performance.now();
+    this._frameTimes.push(now);
+
+    // Keep only recent samples
+    while (this._frameTimes.length > this._maxSamples) {
+      this._frameTimes.shift();
+    }
+
+    // Calculate FPS from frame times
+    if (this._frameTimes.length > 1) {
+      const elapsed = this._frameTimes[this._frameTimes.length - 1] - this._frameTimes[0];
+      this._currentFPS = (this._frameTimes.length - 1) / (elapsed / 1000);
+    }
+
+    // Adapt WebSocket update rate based on FPS
+    this._adaptUpdateRate();
+  },
+
+  _adaptUpdateRate: function() {
+    if (this._currentFPS < 30) {
+      this._wsUpdateRate = 5;   // 5Hz when struggling
+    } else if (this._currentFPS < 45) {
+      this._wsUpdateRate = 7;   // 7Hz when moderate
+    } else {
+      this._wsUpdateRate = 10;  // Default 10Hz
+    }
+  },
+
+  getFPS: function() {
+    return Math.round(this._currentFPS);
+  },
+
+  getRecommendedUpdateRate: function() {
+    return this._wsUpdateRate;
+  }
+};
+
 // Export for use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = AudioEngine;

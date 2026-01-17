@@ -1,9 +1,54 @@
 import os
 import json
 import re
+import hashlib
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import OrderedDict
 import time
+
+# Import semantic taxonomy for prompt enhancement
+try:
+    from .taxonomy import get_semantic_mapping, enhance_prompt_with_context
+except ImportError:
+    # Fallback if taxonomy module not available
+    def get_semantic_mapping(prompt): return {"keywords": [], "affinities": {}, "primary_biosignal": "alpha", "suggested_params": []}
+    def enhance_prompt_with_context(prompt): return prompt
+
+
+class SketchCache:
+    """LRU cache for generated sketches to reduce redundant API calls."""
+
+    def __init__(self, max_size: int = 50):
+        self.max_size = max_size
+        self._cache: OrderedDict = OrderedDict()
+
+    def _get_key(self, prompt: str, context: str = "") -> str:
+        """Generate a cache key from prompt and context."""
+        content = f"{prompt.lower().strip()}|{context}"
+        return hashlib.md5(content.encode()).hexdigest()
+
+    def get(self, prompt: str, context: str = "") -> Optional[Dict]:
+        """Get cached result if available."""
+        key = self._get_key(prompt, context)
+        if key in self._cache:
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return None
+
+    def set(self, prompt: str, context: str, value: Dict) -> None:
+        """Cache a generation result."""
+        key = self._get_key(prompt, context)
+        self._cache[key] = value
+        self._cache.move_to_end(key)
+        # Evict oldest if over capacity
+        while len(self._cache) > self.max_size:
+            self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        """Clear all cached entries."""
+        self._cache.clear()
 
 
 class AssistantService:
@@ -92,6 +137,7 @@ Be concise and always format patches as valid JSON."""
     def __init__(self):
         self.client = None
         self.available = False
+        self.sketch_cache = SketchCache(max_size=50)
         self._init_client()
 
     def _init_client(self):
@@ -139,74 +185,275 @@ Be concise and always format patches as valid JSON."""
 
     # ============ AI VISUAL GENERATION ============
 
-    P5JS_GENERATION_PROMPT = """You are a p5.js expert for HeadWave, a biosignal visual programming tool. Generate a complete, optimized, interactive p5.js sketch.
-
-INTERACTIVE PARAMETERS:
-Include 3-4 parameters using p.getParam('name') for real-time control.
-Each p.getParam() call MUST have a sensible default: p.getParam('paramName') || defaultValue
-
-RECOMMENDED PARAMETERS:
-- speed: Controls animation speed (0.001 to 0.1)
-- intensity: Controls visual intensity/size/amplitude (0.1 to 2.0)
-- colorHue: Shifts the color palette (0 to 360)
-- complexity: Controls detail level/count (1 to 20)
-
-CODE REQUIREMENTS:
-1. Format: function(p) { ... } (p5.js instance mode)
-2. Include p.setup and p.draw functions
-3. Use p.colorMode(p.HSB, 360, 100, 100, 100) for dynamic colors
-4. Make responsive using p.width and p.height
-5. Add smooth animations (sin/cos waves, noise, lerp)
-6. Performance: cache calculations, avoid creating objects in draw()
-7. DO NOT include debug text or parameter value displays - only render visual elements
-
-OUTPUT FORMAT:
-First output the JavaScript code, then on a new line output "---PARAMS---" followed by a JSON array of parameters.
-
-function(p) {
-  // code here
-}
----PARAMS---
-[{"name":"speed","min":0.001,"max":0.1,"default":0.02},{"name":"intensity","min":0.1,"max":2,"default":1},...]
-
-EXAMPLE OUTPUT:
-function(p) {
+    # Fallback sketches for error recovery
+    FALLBACK_SKETCHES = {
+        "default": """function(p) {
   let t = 0;
-
   p.setup = function() {
     p.createCanvas(400, 400);
     p.colorMode(p.HSB, 360, 100, 100, 100);
     p.noStroke();
   };
-
   p.draw = function() {
-    p.background(0, 0, 10);
+    let intensity = p.getParam('intensity') || 0.5;
+    p.background(220, 20, 10);
+    t += 0.02;
+    p.translate(p.width/2, p.height/2);
+    for (let i = 0; i < 5; i++) {
+      let r = 50 + i * 30 + p.sin(t + i * 0.5) * 20 * intensity;
+      let alpha = 60 - i * 10;
+      p.fill(200 + i * 20, 50, 80, alpha);
+      p.ellipse(0, 0, r * 2, r * 2);
+    }
+  };
+}""",
+        "error": """function(p) {
+  p.setup = function() {
+    p.createCanvas(400, 400);
+    p.colorMode(p.HSB, 360, 100, 100, 100);
+  };
+  p.draw = function() {
+    p.background(0, 60, 15);
+    p.fill(0, 0, 60);
+    p.textAlign(p.CENTER, p.CENTER);
+    p.textSize(14);
+    p.text('Visual generation error', p.width/2, p.height/2 - 10);
+    p.textSize(11);
+    p.fill(0, 0, 40);
+    p.text('Try a different prompt', p.width/2, p.height/2 + 15);
+  };
+}""",
+        "minimal": """function(p) {
+  let t = 0;
+  p.setup = function() {
+    p.createCanvas(400, 400);
+    p.colorMode(p.HSB, 360, 100, 100, 100);
+    p.noStroke();
+  };
+  p.draw = function() {
+    let calmLevel = p.getParam('calmLevel') || 0.5;
+    p.background(220, 15, 10);
+    t += 0.015;
+    let size = p.min(p.width, p.height) * 0.25 * (1 + p.sin(t) * 0.2 * calmLevel);
+    p.fill(200, 40, 70, 50);
+    p.ellipse(p.width/2, p.height/2, size, size);
+  };
+}"""
+    }
+
+    @classmethod
+    def get_fallback_sketch(cls, sketch_type: str = "default") -> str:
+        """Get a fallback sketch for error recovery."""
+        return cls.FALLBACK_SKETCHES.get(sketch_type, cls.FALLBACK_SKETCHES["default"])
+
+    # Biosignal-to-Visual Taxonomy (Spellburst approach)
+    BIOSIGNAL_TAXONOMY = """
+BIOSIGNAL-TO-VISUAL MAPPING:
+When designing parameters, consider how biosignals naturally map to visual properties:
+
+ALPHA (8-13 Hz) - Relaxed, calm states:
+  → Gentle pulsing rhythms (0.5-2 Hz oscillation)
+  → Soft, warm colors (blues, purples, soft greens)
+  → Slow, flowing motion
+  → Low complexity, smooth curves
+  → High transparency/soft edges
+
+BETA (13-30 Hz) - Active focus, concentration:
+  → Sharp edges and geometric patterns
+  → High contrast colors
+  → Rapid motion and quick transitions
+  → Medium-high complexity
+  → Strong, defined shapes
+
+THETA (4-8 Hz) - Creative, meditative states:
+  → Flowing, organic shapes
+  → Color gradients and transitions
+  → Dream-like, morphing forms
+  → Spiral and wave patterns
+  → Soft particle systems
+
+GAMMA (30-50 Hz) - High cognition, insight:
+  → Complex, intricate patterns
+  → Fine detail and texture
+  → Rapid color shifts
+  → Fractal-like structures
+  → High density elements
+
+DELTA (0.5-4 Hz) - Deep relaxation:
+  → Very slow, breathing-like motion
+  → Dark, deep colors
+  → Minimal complexity
+  → Ambient, subtle changes
+  → Large, smooth shapes
+
+HAND TRACKING:
+  → pinch: Intensity control, trigger events (0-1)
+  → openness: Scale/size modulation (0-1)
+  → x/y/z position: Spatial control, cursor position
+
+FACE TRACKING:
+  → smile: Brightness, positive color shift (0-1)
+  → brow: Tension, complexity (0-1)
+  → mouth: Volume, scale (0-1)
+  → gaze x/y: Focus point, direction (-1 to 1)
+"""
+
+    # Few-shot examples (Spellburst approach)
+    FEW_SHOT_EXAMPLES = """
+=== EXAMPLE 1: Simple (Breathing Circle) ===
+PROMPT: "a pulsing circle that breathes"
+THOUGHT: Need smooth expand/contract animation using sin(). Parameters: speed controls breathing rate, intensity affects size variation, calmLevel for alpha-responsive softness.
+CODE:
+function(p) {
+  let t = 0;
+  p.setup = function() {
+    p.createCanvas(400, 400);
+    p.colorMode(p.HSB, 360, 100, 100, 100);
+    p.noStroke();
+  };
+  p.draw = function() {
     let speed = p.getParam('speed') || 0.02;
     let intensity = p.getParam('intensity') || 1;
-    let hue = p.getParam('colorHue') || 200;
-    let count = p.floor(p.getParam('complexity') || 8);
-
+    let calmLevel = p.getParam('calmLevel') || 0.5;
+    p.background(220, 20, 10);
     t += speed;
-    p.translate(p.width/2, p.height/2);
+    let baseSize = p.min(p.width, p.height) * 0.3;
+    let breathe = p.sin(t) * 0.3 * intensity;
+    let size = baseSize * (1 + breathe);
+    let alpha = 60 + calmLevel * 30;
+    p.fill(200 + calmLevel * 40, 60, 80, alpha);
+    p.ellipse(p.width/2, p.height/2, size, size);
+    p.fill(210 + calmLevel * 30, 40, 95, alpha * 0.5);
+    p.ellipse(p.width/2, p.height/2, size * 0.6, size * 0.6);
+  };
+}
+---PARAMS---
+[{"name":"speed","min":0.005,"max":0.08,"default":0.02},{"name":"intensity","min":0.2,"max":2,"default":1},{"name":"calmLevel","min":0,"max":1,"default":0.5}]
 
-    for (let i = 0; i < count; i++) {
-      let angle = p.TWO_PI * i / count + t;
-      let r = 80 + p.sin(t * 2 + i) * 40 * intensity;
-      let x = p.cos(angle) * r;
-      let y = p.sin(angle) * r;
-      let size = 20 + p.sin(t * 3 + i * 0.5) * 15 * intensity;
-
-      p.fill((hue + i * 40) % 360, 80, 90, 80);
-      p.ellipse(x, y, size, size);
-
-      // Inner glow
-      p.fill((hue + i * 40 + 30) % 360, 60, 100, 40);
-      p.ellipse(x, y, size * 0.6, size * 0.6);
+=== EXAMPLE 2: Medium (Neural Particles) ===
+PROMPT: "particles that respond to brain waves"
+THOUGHT: Particle system with flow field. brainActivity controls particle speed/energy, colorShift for hue modulation, complexity for particle count. Cache particles array outside draw().
+CODE:
+function(p) {
+  let particles = [];
+  const MAX_PARTICLES = 100;
+  p.setup = function() {
+    p.createCanvas(400, 400);
+    p.colorMode(p.HSB, 360, 100, 100, 100);
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      particles.push({x: p.random(p.width), y: p.random(p.height), vx: 0, vy: 0, life: p.random(100, 200)});
+    }
+  };
+  p.draw = function() {
+    let brainActivity = p.getParam('brainActivity') || 0.5;
+    let colorShift = p.getParam('colorShift') || 180;
+    let complexity = p.getParam('complexity') || 0.5;
+    p.background(240, 30, 8, 25);
+    let count = p.floor(20 + complexity * 80);
+    for (let i = 0; i < p.min(count, particles.length); i++) {
+      let pt = particles[i];
+      let angle = p.noise(pt.x * 0.01, pt.y * 0.01, p.frameCount * 0.01) * p.TWO_PI * 2;
+      let speed = 0.5 + brainActivity * 3;
+      pt.vx = p.lerp(pt.vx, p.cos(angle) * speed, 0.1);
+      pt.vy = p.lerp(pt.vy, p.sin(angle) * speed, 0.1);
+      pt.x += pt.vx; pt.y += pt.vy;
+      pt.life--;
+      if (pt.life <= 0 || pt.x < 0 || pt.x > p.width || pt.y < 0 || pt.y > p.height) {
+        pt.x = p.random(p.width); pt.y = p.random(p.height); pt.life = p.random(100, 200);
+      }
+      let hue = (colorShift + brainActivity * 60 + i) % 360;
+      let alpha = p.map(pt.life, 0, 200, 0, 80);
+      p.noStroke();
+      p.fill(hue, 70, 90, alpha);
+      let size = 3 + brainActivity * 4;
+      p.ellipse(pt.x, pt.y, size, size);
     }
   };
 }
 ---PARAMS---
-[{"name":"speed","min":0.005,"max":0.1,"default":0.02},{"name":"complexity","min":3,"max":20,"default":8},{"name":"intensity","min":0.3,"max":2,"default":1},{"name":"colorHue","min":0,"max":360,"default":200}]
+[{"name":"brainActivity","min":0,"max":1,"default":0.5},{"name":"colorShift","min":0,"max":360,"default":180},{"name":"complexity","min":0,"max":1,"default":0.5}]
+
+=== EXAMPLE 3: Complex (Sacred Geometry Mandala) ===
+PROMPT: "sacred geometry mandala for meditation"
+THOUGHT: Radial symmetry with multiple layers. layers param controls depth, rotationSpeed for animation, calmLevel affects overall pace. Use push/pop for rotation transforms.
+CODE:
+function(p) {
+  let t = 0;
+  p.setup = function() {
+    p.createCanvas(400, 400);
+    p.colorMode(p.HSB, 360, 100, 100, 100);
+  };
+  p.draw = function() {
+    let layers = p.floor(p.getParam('layers') || 5);
+    let rotationSpeed = p.getParam('rotationSpeed') || 0.01;
+    let calmLevel = p.getParam('calmLevel') || 0.5;
+    let colorBase = p.getParam('colorBase') || 200;
+    p.background(240, 15, 8);
+    t += rotationSpeed * (0.5 + calmLevel * 0.5);
+    p.translate(p.width/2, p.height/2);
+    p.noFill();
+    for (let layer = 0; layer < layers; layer++) {
+      let layerRatio = layer / layers;
+      let radius = 30 + layerRatio * p.min(p.width, p.height) * 0.4;
+      let sides = 6 + layer * 2;
+      let hue = (colorBase + layer * 20) % 360;
+      p.push();
+      p.rotate(t * (layer % 2 === 0 ? 1 : -1) * (1 - layerRatio * 0.5));
+      p.stroke(hue, 50 + calmLevel * 30, 70, 60);
+      p.strokeWeight(1 + calmLevel);
+      p.beginShape();
+      for (let i = 0; i <= sides; i++) {
+        let angle = p.TWO_PI * i / sides;
+        let r = radius + p.sin(t * 2 + layer + i) * 10 * (1 - calmLevel * 0.5);
+        p.vertex(p.cos(angle) * r, p.sin(angle) * r);
+      }
+      p.endShape(p.CLOSE);
+      p.pop();
+    }
+    for (let i = 0; i < 6; i++) {
+      p.push();
+      p.rotate(p.TWO_PI * i / 6 + t * 0.5);
+      p.stroke((colorBase + 60) % 360, 40, 80, 40);
+      p.line(20, 0, p.min(p.width, p.height) * 0.45, 0);
+      p.pop();
+    }
+  };
+}
+---PARAMS---
+[{"name":"layers","min":2,"max":8,"default":5},{"name":"rotationSpeed","min":0.002,"max":0.04,"default":0.01},{"name":"calmLevel","min":0,"max":1,"default":0.5},{"name":"colorBase","min":0,"max":360,"default":200}]
+"""
+
+    P5JS_GENERATION_PROMPT = """You are a p5.js expert for HeadWave, a biosignal visual programming tool. Generate complete, optimized, interactive p5.js sketches that respond to brain signals (EEG), hand tracking, and face tracking.
+
+THINKING PROCESS (follow this for each generation):
+1. INTERPRET: What is the core visual concept? What mood/feeling should it evoke?
+2. STRUCTURE: Which p5.js techniques are needed? (particles, geometry, noise, etc.)
+3. PARAMETERS: What 3-4 controllable values make sense for biosignal input?
+4. OPTIMIZE: How to maintain 60fps? (cache arrays, avoid object creation in draw)
+
+""" + BIOSIGNAL_TAXONOMY + """
+
+""" + FEW_SHOT_EXAMPLES + """
+
+INTERACTIVE PARAMETERS (CRITICAL):
+- Include 3-4 parameters using p.getParam('name') for real-time biosignal control
+- Each p.getParam() call MUST have a sensible default: p.getParam('paramName') || defaultValue
+- Choose parameter names that reflect biosignal mapping (e.g., calmLevel, brainActivity, focusIntensity)
+- Parameter ranges should be 0-1 for direct biosignal mapping, or intuitive ranges for manual control
+
+CODE REQUIREMENTS (self-validate before outputting):
+1. Format: function(p) { ... } (p5.js instance mode)
+2. Must have p.setup and p.draw functions
+3. All p.getParam() calls need || defaultValue fallback
+4. No undefined variables
+5. No division by zero risks
+6. Use p.colorMode(p.HSB, 360, 100, 100, 100) for dynamic colors
+7. Make responsive using p.width and p.height
+8. Performance: cache arrays/objects at top level, avoid creating objects in draw()
+9. NO debug text or parameter displays - only render visual elements
+
+OUTPUT FORMAT:
+Output the JavaScript code, then "---PARAMS---" followed by a JSON array of parameters.
 
 CRITICAL: Your response must start IMMEDIATELY with "function(p)" - no text before it, no markdown, no explanation. Just the raw code followed by ---PARAMS--- and the JSON array."""
 
@@ -244,13 +491,25 @@ OUTPUT FORMAT (valid JSON only, no markdown):
 Identify 3-6 meaningful parameters. Output ONLY valid JSON."""
 
     def generate_visual(self, prompt: str, background_color: str = "#0d1117",
-                        previous_code: str = None, previous_prompt: str = None) -> Dict[str, Any]:
+                        previous_code: str = None, previous_prompt: str = None,
+                        use_cache: bool = True) -> Dict[str, Any]:
         """Generate p5.js code from a natural language description with embedded parameters."""
         if not prompt:
             return {"status": "error", "message": "No prompt provided"}
 
         if not self.is_available():
             return {"status": "error", "message": "AI service not available"}
+
+        # Check cache for new sketches (not iterations)
+        cache_context = f"{background_color}"
+        if use_cache and not previous_code:
+            cached = self.sketch_cache.get(prompt, cache_context)
+            if cached:
+                return {"status": "ok", "code": cached["code"],
+                        "parameters": cached["parameters"], "cached": True}
+
+        # Get semantic mapping for better context-aware generation
+        semantic_map = get_semantic_mapping(prompt)
 
         # Build the user message
         if previous_code:
@@ -267,8 +526,14 @@ EXISTING CODE TO MODIFY:
 Apply the requested changes while preserving the overall structure and working parts.
 Output the COMPLETE modified code with ---PARAMS--- section."""
         else:
-            # New sketch mode
-            user_message = f"Create a p5.js sketch for: {prompt}"
+            # New sketch mode with semantic context
+            enhanced_prompt = enhance_prompt_with_context(prompt)
+            user_message = f"Create a p5.js sketch for: {enhanced_prompt}"
+
+            # Add biosignal optimization hint
+            if semantic_map.get("primary_biosignal"):
+                biosignal = semantic_map["primary_biosignal"]
+                user_message += f"\n\nOPTIMIZE FOR: {biosignal} biosignal input (include a '{biosignal}Level' or similar parameter)"
 
         if background_color and background_color != "#0d1117":
             user_message += f"\n\nIMPORTANT: Use this background color: {background_color}"
@@ -280,7 +545,7 @@ Output the COMPLETE modified code with ---PARAMS--- section."""
                     {"role": "user", "content": user_message}
                 ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.7 if previous_code else 0.8,
+                temperature=0.35 if previous_code else 0.45,
                 max_tokens=2500,
             )
 
@@ -320,6 +585,10 @@ Output the COMPLETE modified code with ---PARAMS--- section."""
             # Validate it looks like a p5.js sketch
             if "function(p)" not in code and "p.setup" not in code:
                 return {"status": "error", "message": "Generated code doesn't appear to be valid p5.js"}
+
+            # Cache successful new generations
+            if not previous_code:
+                self.sketch_cache.set(prompt, cache_context, {"code": code, "parameters": parameters})
 
             return {"status": "ok", "code": code, "parameters": parameters}
 
@@ -532,76 +801,6 @@ Output ONLY valid JSON with the optimized code."""
         except Exception as e:
             return {"status": "error", "message": f"Error optimizing code: {str(e)}"}
 
-    # ============ STYLE/BEST PRACTICES AGENT ============
-
-    STYLE_PROMPT = """You are a p5.js code style and best practices expert. Review the code for style issues and improvements.
-
-REVIEW FOR:
-1. **Code organization**: setup() and draw() structure, variable declarations at top
-2. **Naming conventions**: camelCase for variables, descriptive names
-3. **Magic numbers**: Replace hardcoded values with named constants or parameters
-4. **Redundant code**: DRY principle, extract repeated patterns
-5. **Comments**: Add brief comments for complex logic (but don't over-comment)
-6. **p5.js idioms**: Use p5 functions properly (map, constrain, lerp, etc.)
-7. **Modularity**: Extract complex logic into helper functions
-8. **Color usage**: Consistent color mode, use HSB for dynamic colors
-
-OUTPUT FORMAT (JSON only, no markdown):
-{
-  "hasIssues": true/false,
-  "suggestions": [
-    {
-      "type": "naming" | "organization" | "magic-number" | "redundancy" | "idiom",
-      "description": "what could be improved",
-      "priority": "high" | "medium" | "low"
-    }
-  ],
-  "improvedCode": "// The improved code with style fixes"
-}
-
-Output ONLY valid JSON."""
-
-    def check_style(self, code: str) -> Dict[str, Any]:
-        """Check p5.js code for style and best practices."""
-        if not code:
-            return {"status": "error", "message": "No code provided"}
-
-        if not self.is_available():
-            return {"status": "error", "message": "AI service not available"}
-
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": self.STYLE_PROMPT},
-                    {"role": "user", "content": f"Review this p5.js code for style:\n\n{code}"}
-                ],
-                model="llama-3.3-70b-versatile",
-                temperature=0.3,
-                max_tokens=2048,
-            )
-
-            response_text = chat_completion.choices[0].message.content.strip()
-
-            json_text = response_text
-            if "```" in json_text:
-                matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
-                if matches:
-                    json_text = matches[0].strip()
-
-            try:
-                result = json.loads(json_text)
-                return {
-                    "status": "ok",
-                    "hasIssues": result.get("hasIssues", False),
-                    "suggestions": result.get("suggestions", []),
-                    "improvedCode": result.get("improvedCode")
-                }
-            except json.JSONDecodeError:
-                return {"status": "ok", "hasIssues": False, "suggestions": [], "improvedCode": None}
-
-        except Exception as e:
-            return {"status": "error", "message": f"Error checking style: {str(e)}"}
-
     # ============ INTERACTIVITY AGENT ============
 
     INTERACTIVITY_PROMPT = """You are a p5.js interactivity expert for HeadWave, a biosignal visual programming environment.
@@ -695,125 +894,49 @@ Output ONLY valid JSON."""
         except Exception as e:
             return {"status": "error", "message": f"Error checking interactivity: {str(e)}"}
 
-    # ============ COORDINATOR AGENT ============
+    # ============ SIMPLIFIED ENHANCEMENT (Single LLM call) ============
 
-    COORDINATOR_PROMPT = """You are a code coordinator for HeadWave, a biosignal visual programming environment. You receive analysis from FOUR specialized agents and must merge their outputs into a single, optimal result.
-
-INPUT FORMAT:
-You will receive JSON with results from:
-1. **validator**: Checks for errors and bugs
-2. **optimizer**: Improves performance
-3. **stylist**: Improves code style and best practices
-4. **interactivity**: Identifies parameters for biosignal input mapping (EEG, hand tracking, face tracking)
-
-YOUR TASK:
-1. Start with the code that has all errors fixed (validator's fixedCode, or original if valid)
-2. Apply performance optimizations that don't conflict with correctness
-3. Apply style improvements that don't conflict with performance
-4. **CRITICAL**: Apply interactivity improvements - ensure all suggested p.getParam() calls are added
-5. If agents disagree, prioritize: correctness > interactivity > performance > style
-6. Preserve all functionality - don't remove features
-
-INTERACTIVITY IS KEY:
-- The final code MUST use p.getParam('paramName') for all identified interactive parameters
-- Ensure 3-6 meaningful parameters are exposed for biosignal control
-- Parameters should create visible, meaningful changes when modulated
+    ENHANCE_PROMPT = """You are a p5.js expert for HeadWave. Enhance the provided sketch by:
+1. Fix any syntax errors or bugs
+2. Optimize for 60fps performance (cache arrays, avoid object creation in draw())
+3. Add/improve interactive parameters using p.getParam('name') || defaultValue
+4. Ensure parameters map well to biosignals (alpha/theta for calm, beta/gamma for active)
 
 OUTPUT FORMAT (JSON only, no markdown):
 {
-  "finalCode": "// The merged, optimal code with all p.getParam() calls",
-  "summary": {
-    "errorsFixed": 0,
-    "optimizationsApplied": 0,
-    "styleImprovements": 0,
-    "interactiveParams": 0
-  },
-  "changes": [
-    {
-      "type": "fix" | "optimization" | "style" | "interactivity",
-      "description": "brief description of change"
-    }
-  ],
+  "enhancedCode": "function(p) { ... }",
+  "improvements": ["description of each improvement"],
   "parameters": [
-    {
-      "name": "paramName",
-      "min": 0,
-      "max": 1,
-      "default": 0.5,
-      "recommendedInput": "alpha | beta | handPinch | etc"
-    }
+    {"name": "paramName", "min": 0, "max": 1, "default": 0.5, "description": "what it controls"}
   ]
 }
 
-Be decisive and output clean, working, INTERACTIVE code. Output ONLY valid JSON."""
+Output ONLY valid JSON."""
 
-    def _run_agent(self, agent_name: str, code: str) -> Dict[str, Any]:
-        """Run a single agent and return its result with timing."""
-        start = time.time()
+    def enhance_visual(self, code: str) -> Dict[str, Any]:
+        """Optional: Enhance a visual with validation, optimization, and interactivity in a single LLM call."""
+        if not code:
+            return {"status": "error", "message": "No code provided"}
 
-        if agent_name == "validator":
-            result = self.validate_code(code)
-        elif agent_name == "optimizer":
-            result = self.optimize_code(code)
-        elif agent_name == "stylist":
-            result = self.check_style(code)
-        elif agent_name == "interactivity":
-            result = self.check_interactivity(code)
-        else:
-            result = {"status": "error", "message": f"Unknown agent: {agent_name}"}
-
-        result["_agent"] = agent_name
-        result["_duration_ms"] = int((time.time() - start) * 1000)
-        return result
-
-    def coordinate_results(self, original_code: str, validator_result: Dict,
-                           optimizer_result: Dict, style_result: Dict,
-                           interactivity_result: Dict = None) -> Dict[str, Any]:
-        """Coordinate and merge results from all agents."""
         if not self.is_available():
             return {"status": "error", "message": "AI service not available"}
 
-        interactivity_result = interactivity_result or {}
-
-        # Build context for coordinator
-        context = {
-            "originalCode": original_code,
-            "validator": {
-                "valid": validator_result.get("valid", True),
-                "issues": validator_result.get("issues", []),
-                "fixedCode": validator_result.get("fixedCode")
-            },
-            "optimizer": {
-                "optimized": optimizer_result.get("optimized", False),
-                "improvements": optimizer_result.get("improvements", []),
-                "optimizedCode": optimizer_result.get("optimizedCode"),
-                "speedup": optimizer_result.get("estimatedSpeedup", "")
-            },
-            "stylist": {
-                "hasIssues": style_result.get("hasIssues", False),
-                "suggestions": style_result.get("suggestions", []),
-                "improvedCode": style_result.get("improvedCode")
-            },
-            "interactivity": {
-                "hasOpportunities": interactivity_result.get("hasOpportunities", False),
-                "parameters": interactivity_result.get("parameters", []),
-                "improvedCode": interactivity_result.get("improvedCode")
-            }
-        }
-
         try:
+            start_time = time.time()
+
             chat_completion = self.client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": self.COORDINATOR_PROMPT},
-                    {"role": "user", "content": f"Merge these agent results:\n\n{json.dumps(context, indent=2)}"}
+                    {"role": "system", "content": self.ENHANCE_PROMPT},
+                    {"role": "user", "content": f"Enhance this p5.js sketch:\n\n{code}"}
                 ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.2,
-                max_tokens=4000,
+                temperature=0.3,
+                max_tokens=3000,
             )
 
             response_text = chat_completion.choices[0].message.content.strip()
 
+            # Clean up response
             json_text = response_text
             if "```" in json_text:
                 matches = re.findall(r'```(?:json)?\s*([\s\S]*?)```', json_text)
@@ -822,98 +945,17 @@ Be decisive and output clean, working, INTERACTIVE code. Output ONLY valid JSON.
 
             try:
                 result = json.loads(json_text)
+                duration_ms = int((time.time() - start_time) * 1000)
+
                 return {
                     "status": "ok",
-                    "finalCode": result.get("finalCode"),
-                    "summary": result.get("summary", {}),
-                    "changes": result.get("changes", []),
-                    "parameters": result.get("parameters", [])
+                    "enhancedCode": result.get("enhancedCode"),
+                    "improvements": result.get("improvements", []),
+                    "parameters": result.get("parameters", []),
+                    "duration_ms": duration_ms
                 }
             except json.JSONDecodeError:
-                # Fallback: return best available code (prefer interactivity code)
-                if interactivity_result.get("improvedCode"):
-                    return {"status": "ok", "finalCode": interactivity_result["improvedCode"],
-                            "summary": {"interactiveParams": len(interactivity_result.get("parameters", []))},
-                            "changes": [], "parameters": interactivity_result.get("parameters", [])}
-                if validator_result.get("fixedCode"):
-                    return {"status": "ok", "finalCode": validator_result["fixedCode"],
-                            "summary": {"errorsFixed": len(validator_result.get("issues", []))},
-                            "changes": [], "parameters": []}
-                return {"status": "ok", "finalCode": original_code, "summary": {}, "changes": [], "parameters": []}
+                return {"status": "error", "message": "Failed to parse enhancement result"}
 
         except Exception as e:
-            return {"status": "error", "message": f"Error coordinating results: {str(e)}"}
-
-    def analyze_code_parallel(self, code: str) -> Dict[str, Any]:
-        """Run all analysis agents in parallel and coordinate results."""
-        if not code:
-            return {"status": "error", "message": "No code provided"}
-
-        if not self.is_available():
-            return {"status": "error", "message": "AI service not available"}
-
-        start_time = time.time()
-        agents = ["validator", "optimizer", "stylist", "interactivity"]
-        results = {}
-
-        # Run all 4 agents in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor.submit(self._run_agent, agent, code): agent for agent in agents}
-
-            for future in as_completed(futures):
-                agent_name = futures[future]
-                try:
-                    results[agent_name] = future.result()
-                except Exception as e:
-                    results[agent_name] = {"status": "error", "message": str(e)}
-
-        parallel_time = int((time.time() - start_time) * 1000)
-
-        # Coordinate results from all 4 agents
-        coord_start = time.time()
-        coordinated = self.coordinate_results(
-            code,
-            results.get("validator", {}),
-            results.get("optimizer", {}),
-            results.get("stylist", {}),
-            results.get("interactivity", {})
-        )
-        coord_time = int((time.time() - coord_start) * 1000)
-
-        total_time = int((time.time() - start_time) * 1000)
-
-        return {
-            "status": coordinated.get("status", "ok"),
-            "finalCode": coordinated.get("finalCode"),
-            "summary": coordinated.get("summary", {}),
-            "changes": coordinated.get("changes", []),
-            "parameters": coordinated.get("parameters", []),
-            "agentResults": {
-                "validator": {
-                    "valid": results.get("validator", {}).get("valid", True),
-                    "issueCount": len(results.get("validator", {}).get("issues", [])),
-                    "duration_ms": results.get("validator", {}).get("_duration_ms", 0)
-                },
-                "optimizer": {
-                    "optimized": results.get("optimizer", {}).get("optimized", False),
-                    "improvementCount": len(results.get("optimizer", {}).get("improvements", [])),
-                    "speedup": results.get("optimizer", {}).get("estimatedSpeedup", ""),
-                    "duration_ms": results.get("optimizer", {}).get("_duration_ms", 0)
-                },
-                "stylist": {
-                    "hasIssues": results.get("stylist", {}).get("hasIssues", False),
-                    "suggestionCount": len(results.get("stylist", {}).get("suggestions", [])),
-                    "duration_ms": results.get("stylist", {}).get("_duration_ms", 0)
-                },
-                "interactivity": {
-                    "hasOpportunities": results.get("interactivity", {}).get("hasOpportunities", False),
-                    "paramCount": len(results.get("interactivity", {}).get("parameters", [])),
-                    "duration_ms": results.get("interactivity", {}).get("_duration_ms", 0)
-                }
-            },
-            "timing": {
-                "parallel_ms": parallel_time,
-                "coordinator_ms": coord_time,
-                "total_ms": total_time
-            }
-        }
+            return {"status": "error", "message": f"Error enhancing visual: {str(e)}"}
