@@ -1911,9 +1911,12 @@
       ws = new WebSocket(url);
 
       ws.onopen = () => {
+        // Map non-streaming modes to "bands" for the WS protocol
+        const streamMode = (currentMode === "audio" || currentMode === "sketch" || currentMode === "camera")
+          ? "bands" : currentMode;
         ws.send(
           JSON.stringify({
-            mode: currentMode,
+            mode: streamMode,
             window_sec: WINDOW_SEC,
             interval_ms: UPDATE_INTERVAL_MS,
           })
@@ -1937,8 +1940,8 @@
           }
         } else if (msg.type === "bands") {
           updateBandsChart(msg.channels, msg.bands, msg.values);
-          // Send EEG data to audio engine for modulation
-          if (audioEnabled && typeof AudioEngine !== 'undefined') {
+          // Send EEG data to audio engine for modulation (always feed data, not gated by audioEnabled)
+          if (typeof AudioEngine !== 'undefined') {
             // Send engagement index
             if (msg.engagement !== undefined) {
               AudioEngine.updateData('engagement', msg.engagement);
@@ -2121,6 +2124,20 @@
       // Update backend
       await postJSON('/api/use_simulator', { enabled: useSimulator });
 
+      // Auto-connect and start streaming when enabling simulator
+      if (useSimulator) {
+        try {
+          await postJSON('/api/connect', {});
+          await postJSON('/api/start', {});
+          streaming = true;
+          connected = true;
+          openWS();
+          setStatus();
+        } catch (err) {
+          console.warn('Auto-connect failed:', err);
+        }
+      }
+
       // Update UI message
       const mode = useSimulator ? 'Simulator' : 'Real Hardware';
       showSuccess(`Switched to ${mode} mode`);
@@ -2280,6 +2297,19 @@
         }
 
         // Request bands data if streaming
+        if (ws && streaming) {
+          ws.send(
+            JSON.stringify({
+              mode: "bands",
+              window_sec: WINDOW_SEC,
+              interval_ms: UPDATE_INTERVAL_MS,
+            })
+          );
+        }
+      }
+
+      // When switching to audio/patcher mode, also request bands data
+      if (mode === "audio") {
         if (ws && streaming) {
           ws.send(
             JSON.stringify({

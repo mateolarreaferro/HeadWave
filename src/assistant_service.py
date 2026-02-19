@@ -440,6 +440,7 @@ INTERACTIVE PARAMETERS (CRITICAL):
 - Each p.getParam() call MUST have a sensible default: p.getParam('paramName') || defaultValue
 - Choose parameter names that reflect biosignal mapping (e.g., calmLevel, brainActivity, focusIntensity)
 - Parameter ranges should be 0-1 for direct biosignal mapping, or intuitive ranges for manual control
+- For count/integer parameters (numCircles, segments, layers), use Math.round() or Math.floor() when using the value (e.g., let n = Math.round(p.getParam('numCircles') || 5))
 
 CODE REQUIREMENTS (self-validate before outputting):
 1. Format: function(p) { ... } (p5.js instance mode)
@@ -454,6 +455,7 @@ CODE REQUIREMENTS (self-validate before outputting):
 
 OUTPUT FORMAT:
 Output the JavaScript code, then "---PARAMS---" followed by a JSON array of parameters.
+Each parameter object must include: name, displayName, type ("number"), default, min, max, step (use 1 for integer/count params, 0 for continuous).
 
 CRITICAL: Your response must start IMMEDIATELY with "function(p)" - no text before it, no markdown, no explanation. Just the raw code followed by ---PARAMS--- and the JSON array."""
 
@@ -473,6 +475,7 @@ For each parameter, provide:
 - default: Current or suggested default value
 - min: Reasonable minimum
 - max: Reasonable maximum
+- step: Use 1 for discrete/integer values (counts, segments, layers, number of items), use 0 for continuous values (speeds, sizes, colors, opacity, angles)
 
 OUTPUT FORMAT (valid JSON only, no markdown):
 {
@@ -483,7 +486,17 @@ OUTPUT FORMAT (valid JSON only, no markdown):
       "type": "number",
       "default": 0.01,
       "min": 0.001,
-      "max": 0.1
+      "max": 0.1,
+      "step": 0
+    },
+    {
+      "name": "numCircles",
+      "displayName": "Number of Circles",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 20,
+      "step": 1
     }
   ]
 }
@@ -638,7 +651,8 @@ Output the COMPLETE modified code with ---PARAMS--- section."""
                             "type": param.get("type", "number"),
                             "default": float(param["default"]),
                             "min": float(param["min"]),
-                            "max": float(param["max"])
+                            "max": float(param["max"]),
+                            "step": int(param["step"]) if param.get("step") and float(param.get("step", 0)) >= 1 else 0
                         })
 
                 return {"status": "ok", "parameters": valid_params}

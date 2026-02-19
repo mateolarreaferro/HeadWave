@@ -17,6 +17,8 @@ const Patcher = {
   selectedNodes: new Set(), // For multi-select
   hoveredPort: null,
   hoveredCable: null,
+  resizing: null,
+  adjustingSlider: null,
   mousePos: { x: 0, y: 0 },
   isFullscreen: false,
   originalStyles: null,
@@ -61,7 +63,7 @@ const Patcher = {
       visual_output: '#e11d48', // Rose (darker)
       sender: '#dc2626',      // Red (darker)
       visualization: '#0d9488', // Teal (darker)
-      generation: '#8b5cf6'   // Violet - for gen, prompt, parameters nodes
+      generation: '#8b5cf6'   // Violet - for gen, prompt nodes
     },
     text: {
       primary: '#1a1a1a',
@@ -103,7 +105,7 @@ const Patcher = {
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: default;';
     this.container.appendChild(this.canvas);
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
 
     // Size canvas with HiDPI support
     this.resize();
@@ -441,8 +443,8 @@ const Patcher = {
 
         const extractResult = await extractResponse.json();
         if (extractResult.status === 'ok' && extractResult.parameters) {
-          // Create or update parameters node
-          this._createParametersNode(genNode, extractResult.parameters);
+          // Apply parameters directly to the gen node
+          this._applyParametersToGenNode(genNode, extractResult.parameters);
         }
 
         // Update AudioEngine node with the generated code
@@ -462,17 +464,10 @@ const Patcher = {
     }
   },
 
-  // Create a parameters node with extracted parameters
-  _createParametersNode: function(genNode, parameters) {
-    // Position the parameters node to the left of the gen node
-    const paramsNode = this.addNode('parameters', genNode.x - 200, genNode.y);
-    if (!paramsNode) return;
-
-    // Parameters node has INPUT ports for modulators (EEG, LFO, etc)
-    // No output ports - it directly modifies the linked gen node
-    paramsNode.inputs = [];
-    paramsNode.outputs = [];
-    paramsNode.params = {};
+  // Apply extracted parameters directly to the gen node as input ports
+  _applyParametersToGenNode: function(genNode, parameters) {
+    // Keep 'prompt' as the first input, then add parameter inputs
+    genNode.inputs = ['prompt'];
 
     for (const param of parameters) {
       const paramName = param.name || param;
@@ -481,18 +476,76 @@ const Patcher = {
       const paramDefault = param.default ?? (paramMin + paramMax) / 2;
 
       // Add input port for modulator connections
-      paramsNode.inputs.push(paramName);
-      // Store slider parameter with default
-      paramsNode.params[paramName] = paramDefault;
-      // Also set on the gen node
+      genNode.inputs.push(paramName);
+      // Store parameter value with default
       genNode.params[paramName] = paramDefault;
     }
 
-    // Store parameter metadata and link to gen node
-    paramsNode._parameterMeta = parameters;
-    paramsNode._linkedGenNode = genNode.id;
+    // Store parameter metadata on the gen node itself
+    genNode._parameterMeta = parameters;
+
+    // Sync to AudioEngine node for modulation
+    const audioGenNode = AudioEngine.nodes[genNode.id];
+    if (audioGenNode) {
+      audioGenNode._parameterMeta = parameters;
+      for (const param of parameters) {
+        const paramName = param.name || param;
+        const paramDefault = param.default ?? ((param.min ?? 0) + (param.max ?? 1)) / 2;
+        audioGenNode.params[paramName] = paramDefault;
+      }
+    }
 
     this.render();
+  },
+
+  // Hit-test slider tracks on gen nodes
+  _getGenSliderAt: function(mx, my) {
+    for (let i = this.nodes.length - 1; i >= 0; i--) {
+      const node = this.nodes[i];
+      if (node.type !== 'gen' || !node._parameterMeta || node._parameterMeta.length === 0) continue;
+
+      const dim = this.getNodeDimensions(node);
+      if (mx < node.x || mx > node.x + dim.width || my < node.y || my > node.y + dim.height) continue;
+
+      const params = node._parameterMeta;
+      const numParams = params.length;
+      const sliderRowH = 26;
+      const sliderAreaH = 20 + numParams * sliderRowH;
+      const sliderY0 = node.y + dim.height - sliderAreaH - 4;
+      const sliderPad = 10;
+      const trackX = node.x + sliderPad + 60;
+      const trackW = dim.width - sliderPad * 2 - 60 - 40;
+
+      for (let j = 0; j < numParams; j++) {
+        const sy = sliderY0 + 4 + j * sliderRowH;
+        if (my >= sy + 4 && my <= sy + sliderRowH - 2 && mx >= trackX - 4 && mx <= trackX + trackW + 4) {
+          return { node, paramIndex: j, trackX, trackW };
+        }
+      }
+    }
+    return null;
+  },
+
+  // Update slider value from mouse X position
+  _updateGenSliderValue: function(mx) {
+    if (!this.adjustingSlider) return;
+    const { node, paramIndex, trackX, trackW } = this.adjustingSlider;
+    const pm = node._parameterMeta[paramIndex];
+    if (!pm) return;
+
+    const paramName = pm.name || pm;
+    const pmin = pm.min ?? 0;
+    const pmax = pm.max ?? 1;
+    let t = Math.max(0, Math.min(1, (mx - trackX) / trackW));
+    let val = pmin + t * (pmax - pmin);
+
+    // Round discrete/integer parameters
+    if (pm.step && pm.step >= 1) {
+      val = Math.round(val / pm.step) * pm.step;
+    }
+
+    node.params[paramName] = val;
+    AudioEngine.setParam(node.id, paramName, val);
   },
 
   // Create a Generation Object from selected nodes (prompt + gen + optionally parameters)
@@ -502,14 +555,12 @@ const Patcher = {
     // Find the selected nodes by type
     let promptNode = null;
     let genNode = null;
-    let paramsNode = null;
 
     for (const nodeId of this.selectedNodes) {
       const node = this.nodes.find(n => n.id === nodeId);
       if (!node) continue;
       if (node.type === 'prompt') promptNode = node;
       else if (node.type === 'gen') genNode = node;
-      else if (node.type === 'parameters') paramsNode = node;
     }
 
     if (!promptNode || !genNode) {
@@ -522,8 +573,7 @@ const Patcher = {
       id: 'genobj_' + Date.now(),
       promptNodeId: promptNode.id,
       genNodeId: genNode.id,
-      parametersNodeId: paramsNode?.id || null,
-      parameterValues: paramsNode ? { ...paramsNode.params } : {},
+      parameterValues: genNode._parameterMeta ? { ...genNode.params } : {},
       parentGenerationId: null,
       iterationNumber: 0,
       prompt: promptNode.params.text,
@@ -539,9 +589,6 @@ const Patcher = {
     // Mark nodes as grouped
     promptNode._generationObjectId = generationObject.id;
     genNode._generationObjectId = generationObject.id;
-    if (paramsNode) {
-      paramsNode._generationObjectId = generationObject.id;
-    }
 
     // Visual feedback: add a group border around the nodes
     this._updateGenerationObjectBounds(generationObject);
@@ -552,7 +599,7 @@ const Patcher = {
 
   // Calculate bounds for a generation object group
   _updateGenerationObjectBounds: function(genObj) {
-    const nodeIds = [genObj.promptNodeId, genObj.genNodeId, genObj.parametersNodeId].filter(Boolean);
+    const nodeIds = [genObj.promptNodeId, genObj.genNodeId].filter(Boolean);
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
     for (const nodeId of nodeIds) {
@@ -575,18 +622,20 @@ const Patcher = {
 
   // Get node dimensions based on type
   getNodeDimensions: function(node) {
-    // Gen node - canvas for rendering visuals
+    // Gen node - canvas for rendering visuals + inline parameter sliders
     if (node.type === 'gen') {
-      return { width: 280, height: 200 };
+      const numParams = (node._parameterMeta || []).length;
+      const baseW = 280, baseH = 200;
+      const sliderArea = numParams > 0 ? 20 + numParams * 26 : 0;
+      const minW = baseW;
+      const minH = baseH + sliderArea;
+      const w = Math.max(minW, node._userWidth || 0);
+      const h = Math.max(minH, node._userHeight || 0);
+      return { width: w, height: h };
     }
     // Prompt node - inline text input
     else if (node.type === 'prompt') {
       return { width: 240, height: 80 };
-    }
-    // Parameters node - dynamic based on number of parameters
-    else if (node.type === 'parameters') {
-      const numParams = Object.keys(node.params || {}).length;
-      return { width: 180, height: Math.max(100, 60 + numParams * 24) };
     }
     // AI Canvas - width based on number of inputs
     else if (node.type === 'aiCanvas') {
@@ -737,6 +786,35 @@ const Patcher = {
       return;
     }
 
+    // Check resize handle on gen nodes
+    const resizeNode = this.getNodeAt(pos.x, pos.y);
+    if (resizeNode && resizeNode.type === 'gen') {
+      const dim = this.getNodeDimensions(resizeNode);
+      const handleSize = 16;
+      const hx = resizeNode.x + dim.width - handleSize;
+      const hy = resizeNode.y + dim.height - handleSize;
+      if (pos.x >= hx && pos.y >= hy) {
+        this.resizing = {
+          node: resizeNode,
+          startX: pos.x,
+          startY: pos.y,
+          startWidth: dim.width,
+          startHeight: dim.height
+        };
+        this.canvas.style.cursor = 'nwse-resize';
+        return;
+      }
+    }
+
+    // Check slider hit on gen nodes
+    const sliderHit = this._getGenSliderAt(pos.x, pos.y);
+    if (sliderHit) {
+      this.adjustingSlider = sliderHit;
+      this._updateGenSliderValue(pos.x);
+      this.canvas.style.cursor = 'ew-resize';
+      return;
+    }
+
     // Check node click
     const node = this.getNodeAt(pos.x, pos.y);
     if (node) {
@@ -809,7 +887,21 @@ const Patcher = {
     const pos = this.getMousePos(e);
     this.mousePos = pos;
 
-    if (this.isMultiSelecting && this.selectionBox) {
+    if (this.resizing) {
+      // Resize gen node
+      const dx = pos.x - this.resizing.startX;
+      const dy = pos.y - this.resizing.startY;
+      const numParams = (this.resizing.node._parameterMeta || []).length;
+      const sliderArea = numParams > 0 ? 20 + numParams * 26 : 0;
+      const minW = 280;
+      const minH = 200 + sliderArea;
+      this.resizing.node._userWidth = Math.max(minW, this.resizing.startWidth + dx);
+      this.resizing.node._userHeight = Math.max(minH, this.resizing.startHeight + dy);
+      this.canvas.style.cursor = 'nwse-resize';
+    } else if (this.adjustingSlider) {
+      this._updateGenSliderValue(pos.x);
+      this.canvas.style.cursor = 'ew-resize';
+    } else if (this.isMultiSelecting && this.selectionBox) {
       // Update selection box
       this.selectionBox.endX = pos.x;
       this.selectionBox.endY = pos.y;
@@ -850,6 +942,17 @@ const Patcher = {
 
       if (port) {
         this.canvas.style.cursor = 'crosshair';
+      } else if (node && node.type === 'gen') {
+        // Check resize handle hover
+        const dim = this.getNodeDimensions(node);
+        const handleSize = 16;
+        const hx = node.x + dim.width - handleSize;
+        const hy = node.y + dim.height - handleSize;
+        if (pos.x >= hx && pos.y >= hy) {
+          this.canvas.style.cursor = 'nwse-resize';
+        } else {
+          this.canvas.style.cursor = 'grab';
+        }
       } else if (node) {
         this.canvas.style.cursor = 'grab';
       } else if (cable) {
@@ -862,6 +965,23 @@ const Patcher = {
 
   onMouseUp: function(e) {
     const pos = this.getMousePos(e);
+
+    if (this.resizing) {
+      // Re-execute gen canvas if it has code, to resize the offscreen p5 canvas
+      const rNode = this.resizing.node;
+      if (rNode.params.code) {
+        AudioEngine.executeGenCanvas(rNode.id, rNode, rNode.params.code);
+      }
+      this.resizing = null;
+      this.canvas.style.cursor = 'default';
+      return;
+    }
+
+    if (this.adjustingSlider) {
+      this.adjustingSlider = null;
+      this.canvas.style.cursor = 'default';
+      return;
+    }
 
     if (this.isMultiSelecting && this.selectionBox) {
       // Complete selection box - select all nodes within it
@@ -1042,7 +1162,6 @@ const Patcher = {
         });
         const hasPrompt = selectedTypes.includes('prompt');
         const hasGen = selectedTypes.includes('gen');
-        const hasParams = selectedTypes.includes('parameters');
         const isGenerationGroup = hasPrompt && hasGen;
 
         menu.innerHTML = `
@@ -1386,6 +1505,27 @@ const Patcher = {
         }
       }
 
+      // Add dynamic parameter sliders for Gen nodes (using _parameterMeta)
+      if (node.type === 'gen' && node._parameterMeta) {
+        for (const paramMeta of node._parameterMeta) {
+          const param = paramMeta.name;
+          const displayName = paramMeta.displayName || param.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
+          const value = node.params[param];
+          const step = paramMeta.step >= 1 ? paramMeta.step : ((paramMeta.max - paramMeta.min) / 100);
+          const displayValue = paramMeta.step >= 1 ? Math.round(value) : (typeof value === 'number' ? value.toFixed(2) : value);
+          html += `
+            <div style="margin-bottom: 14px;" data-param-container="${param}">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <label style="color: ${this.theme.text.secondary}; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">${displayName}${paramMeta.step >= 1 ? ' (int)' : ''}</label>
+                <span id="val-${param}" style="color: ${accentColor}; font-size: 12px; font-weight: 600;">${displayValue}</span>
+              </div>
+              <input type="range" data-param="${param}" min="${paramMeta.min}" max="${paramMeta.max}" step="${step}" value="${value}"
+                style="width: 100%; height: 6px; border-radius: 3px; appearance: none; background: ${this.theme.bg.primary}; cursor: pointer;">
+            </div>
+          `;
+        }
+      }
+
       // Add Generate button for AI Canvas
       if (node.type === 'aiCanvas') {
         html += `
@@ -1458,6 +1598,30 @@ const Patcher = {
         `;
       }
 
+      // Add code editor for Gen nodes
+      const genCodeNode = node.type === 'gen' ? node : null;
+      if (genCodeNode && genCodeNode.params.code) {
+        html += `
+          <div style="margin-bottom: 14px;">
+            <button id="toggle-gen-code-editor" style="width: 100%; padding: 8px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.secondary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 12px;">
+              { } View / Edit Code
+            </button>
+            <div id="gen-code-editor-container" style="display: none; margin-top: 10px;">
+              <textarea id="gen-code-editor" style="width: 100%; height: 300px; padding: 12px; background: #1e1e1e; color: #d4d4d4; border: 1px solid ${this.theme.node.border}; border-radius: 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.4; resize: vertical; box-sizing: border-box; tab-size: 2;">${genCodeNode.params.code}</textarea>
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="save-gen-code-btn" style="flex: 1; padding: 8px; background: ${accentColor}; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                  Save Changes
+                </button>
+                <button id="reset-gen-code-btn" style="padding: 8px 12px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                  Reset
+                </button>
+              </div>
+              <div id="gen-code-save-status" style="margin-top: 6px; font-size: 11px; color: ${this.theme.text.muted}; text-align: center;"></div>
+            </div>
+          </div>
+        `;
+      }
+
       html += `
         <div style="display: flex; gap: 10px; margin-top: 20px;">
           <button class="dialog-close" style="flex: 1; padding: 10px; background: ${this.theme.bg.tertiary}; color: ${this.theme.text.primary}; border: 1px solid ${this.theme.node.border}; border-radius: 6px; cursor: pointer; font-size: 14px;">Close</button>
@@ -1495,17 +1659,16 @@ const Patcher = {
           node.params[param] = value;
           AudioEngine.setParam(node.id, param, value);
 
-          // If this is a parameters node, also update the linked gen node
-          if (node._linkedGenNode) {
-            const genNode = self.nodes.find(n => n.id === node._linkedGenNode);
-            if (genNode) {
-              genNode.params[param] = value;
-              AudioEngine.setParam(genNode.id, param, value);
+          const valEl = document.getElementById(`val-${param}`);
+          if (valEl) {
+            // Check if this is a discrete/integer parameter
+            const paramMeta = node._parameterMeta?.find(p => p.name === param);
+            if (paramMeta && paramMeta.step >= 1) {
+              valEl.textContent = Math.round(value);
+            } else {
+              valEl.textContent = typeof value === 'number' ? value.toFixed(2) : value;
             }
           }
-
-          const valEl = document.getElementById(`val-${param}`);
-          if (valEl) valEl.textContent = typeof value === 'number' ? value.toFixed(2) : value;
 
           // Sync color picker with text input
           if (e.target.type === 'color') {
@@ -1831,6 +1994,78 @@ const Patcher = {
         }
       }
 
+      // Gen node code editor handlers
+      {
+        const genCodeNode = node.type === 'gen' ? node : null;
+        const toggleGenCodeBtn = dialog.querySelector('#toggle-gen-code-editor');
+        const genCodeContainer = dialog.querySelector('#gen-code-editor-container');
+        const genCodeEditor = dialog.querySelector('#gen-code-editor');
+        const saveGenCodeBtn = dialog.querySelector('#save-gen-code-btn');
+        const resetGenCodeBtn = dialog.querySelector('#reset-gen-code-btn');
+        const genCodeStatus = dialog.querySelector('#gen-code-save-status');
+
+        if (toggleGenCodeBtn && genCodeContainer) {
+          toggleGenCodeBtn.addEventListener('click', () => {
+            const isHidden = genCodeContainer.style.display === 'none';
+            genCodeContainer.style.display = isHidden ? 'block' : 'none';
+            toggleGenCodeBtn.textContent = isHidden ? '{ } Hide Code Editor' : '{ } View / Edit Code';
+          });
+        }
+
+        if (saveGenCodeBtn && genCodeEditor && genCodeNode) {
+          saveGenCodeBtn.addEventListener('click', async () => {
+            const newCode = genCodeEditor.value;
+            if (!newCode.trim()) {
+              genCodeStatus.textContent = 'Code cannot be empty';
+              genCodeStatus.style.color = '#f85149';
+              return;
+            }
+
+            saveGenCodeBtn.disabled = true;
+            saveGenCodeBtn.textContent = 'Saving...';
+            genCodeStatus.textContent = 'Updating visual...';
+            genCodeStatus.style.color = self.theme.text.muted;
+
+            try {
+              // Update the gen node's code
+              genCodeNode.params.code = newCode;
+
+              // Re-execute the gen canvas with new code
+              AudioEngine.executeGenCanvas(genCodeNode.id, genCodeNode, newCode);
+
+              // Re-extract parameters via API
+              const params = await AudioEngine.extractAIParameters(genCodeNode.id, newCode);
+
+              if (params && params.length > 0) {
+                // Apply parameters directly to the gen node
+                self._applyParametersToGenNode(genCodeNode, params);
+              }
+
+              genCodeStatus.textContent = 'Code saved! Visual updated.';
+              genCodeStatus.style.color = '#22c55e';
+              self.render();
+
+              // Rebuild dialog to show updated parameters
+              setTimeout(() => rebuildDialog(), 500);
+            } catch (err) {
+              genCodeStatus.textContent = 'Error: ' + err.message;
+              genCodeStatus.style.color = '#f85149';
+            }
+
+            saveGenCodeBtn.disabled = false;
+            saveGenCodeBtn.textContent = 'Save Changes';
+          });
+        }
+
+        if (resetGenCodeBtn && genCodeEditor && genCodeNode) {
+          resetGenCodeBtn.addEventListener('click', () => {
+            genCodeEditor.value = genCodeNode.params.code || '';
+            genCodeStatus.textContent = 'Reset to current version';
+            genCodeStatus.style.color = self.theme.text.muted;
+          });
+        }
+      }
+
       // Handle sampler file upload
       if (node.type === 'sampler') {
         const fileInput = dialog.querySelector(`#sampler-file-${node.id}`);
@@ -1888,21 +2123,23 @@ const Patcher = {
     ctx.translate(this.panOffset.x, this.panOffset.y);
     ctx.scale(this.zoom, this.zoom);
 
-    // Grid dots (affected by zoom)
+    // Grid dots (affected by zoom) - batched into single path for performance
     ctx.fillStyle = this.theme.text.muted + '30';
     const gridSize = 30;
     const startX = -this.panOffset.x / this.zoom;
     const startY = -this.panOffset.y / this.zoom;
     const endX = (w - this.panOffset.x) / this.zoom;
     const endY = (h - this.panOffset.y) / this.zoom;
+    const dotRadius = 1.5 / this.zoom;
 
-    for (let x = Math.floor(startX / gridSize) * gridSize; x < endX; x += gridSize) {
-      for (let y = Math.floor(startY / gridSize) * gridSize; y < endY; y += gridSize) {
-        ctx.beginPath();
-        ctx.arc(x, y, 1.5 / this.zoom, 0, Math.PI * 2);
-        ctx.fill();
+    ctx.beginPath();
+    for (let gx = Math.floor(startX / gridSize) * gridSize; gx < endX; gx += gridSize) {
+      for (let gy = Math.floor(startY / gridSize) * gridSize; gy < endY; gy += gridSize) {
+        ctx.moveTo(gx + dotRadius, gy);
+        ctx.arc(gx, gy, dotRadius, 0, Math.PI * 2);
       }
     }
+    ctx.fill();
 
     // Cables
     for (const cable of this.cables) {
@@ -2198,17 +2435,24 @@ const Patcher = {
       ctx.fillText('Double-click for fullscreen', x + w/2, y + h - 8);
       ctx.textAlign = 'left';
     }
-    // Gen node - canvas for rendering generated visuals
+    // Gen node - canvas for rendering generated visuals + inline parameter sliders
     else if (node.type === 'gen') {
+      const params = node._parameterMeta || [];
+      const numParams = params.length;
+      const sliderRowH = 26;
+      const sliderAreaH = numParams > 0 ? 20 + numParams * sliderRowH : 0;
+      const handleSize = 16;
+
+      // Zone 1: Canvas preview
       const previewX = x + 8;
       const previewY = y + hh + 8;
       const previewW = w - 16;
-      const previewH = h - hh - 16;
+      const previewH = h - hh - 16 - sliderAreaH - (numParams > 0 ? 4 : 0);
 
       // Draw preview background
       ctx.fillStyle = node.params.background || '#0d1117';
       ctx.beginPath();
-      ctx.roundRect(previewX, previewY, previewW, previewH, 6);
+      ctx.roundRect(previewX, previewY, previewW, Math.max(40, previewH), 6);
       ctx.fill();
 
       // Check if generating
@@ -2216,37 +2460,88 @@ const Patcher = {
         ctx.fillStyle = accentColor;
         ctx.font = 'bold 12px -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Generating...', x + w/2, previewY + previewH/2);
+        ctx.fillText('Generating...', x + w/2, previewY + Math.max(40, previewH)/2);
         ctx.textAlign = 'left';
       }
       // Check if code is generated - render the visual
       else if (node.params.code) {
-        // Render the embedded p5 canvas if it exists
         if (node._p5Canvas) {
-          ctx.drawImage(node._p5Canvas, previewX, previewY, previewW, previewH);
+          ctx.drawImage(node._p5Canvas, previewX, previewY, previewW, Math.max(40, previewH));
         } else {
-          // Show active indicator while p5 initializes
           ctx.fillStyle = '#22c55e';
           ctx.font = 'bold 11px -apple-system, system-ui, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('Visual Ready', x + w/2, previewY + previewH/2 - 8);
-
-          // Show truncated prompt
+          ctx.fillText('Visual Ready', x + w/2, previewY + Math.max(40, previewH)/2 - 8);
           ctx.fillStyle = this.theme.text.muted;
           ctx.font = '9px -apple-system, system-ui, sans-serif';
           const prompt = node.params.sourcePrompt || '';
           const truncPrompt = prompt.length > 30 ? prompt.slice(0, 27) + '...' : prompt;
-          ctx.fillText(`"${truncPrompt}"`, x + w/2, previewY + previewH/2 + 10);
+          ctx.fillText(`"${truncPrompt}"`, x + w/2, previewY + Math.max(40, previewH)/2 + 10);
           ctx.textAlign = 'left';
         }
       } else {
-        // Empty state
         ctx.fillStyle = this.theme.text.muted;
         ctx.font = '11px -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Connect prompt to generate', x + w/2, previewY + previewH/2);
+        ctx.fillText('Connect prompt to generate', x + w/2, previewY + Math.max(40, previewH)/2);
         ctx.textAlign = 'left';
       }
+
+      // Zone 2: Parameter sliders
+      if (numParams > 0) {
+        const sliderY0 = y + h - sliderAreaH - 4;
+        const sliderPad = 10;
+        const trackX = x + sliderPad + 60; // label space
+        const trackW = w - sliderPad * 2 - 60 - 40; // room for value text
+
+        for (let i = 0; i < numParams; i++) {
+          const pm = params[i];
+          const paramName = pm.name || pm;
+          const sy = sliderY0 + 4 + i * sliderRowH;
+          const val = node.params[paramName] ?? pm.default ?? 0;
+          const pmin = pm.min ?? 0;
+          const pmax = pm.max ?? 1;
+          const t = pmax > pmin ? (val - pmin) / (pmax - pmin) : 0;
+
+          // Label
+          ctx.fillStyle = this.theme.text.secondary;
+          ctx.font = '10px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          const displayName = paramName.length > 8 ? paramName.slice(0, 7) + '..' : paramName;
+          ctx.fillText(displayName, x + sliderPad, sy + sliderRowH / 2);
+
+          // Track background
+          ctx.fillStyle = this.theme.bg.primary;
+          ctx.beginPath();
+          ctx.roundRect(trackX, sy + 8, trackW, 10, 4);
+          ctx.fill();
+
+          // Track fill
+          ctx.fillStyle = accentColor;
+          ctx.beginPath();
+          ctx.roundRect(trackX, sy + 8, Math.max(2, trackW * Math.min(1, Math.max(0, t))), 10, 4);
+          ctx.fill();
+
+          // Value text
+          const displayValue = pm.step >= 1 ? Math.round(val) : (typeof val === 'number' ? val.toFixed(2) : val);
+          ctx.fillStyle = accentColor;
+          ctx.font = '600 10px -apple-system, system-ui, monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText(String(displayValue), x + w - sliderPad, sy + sliderRowH / 2);
+        }
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+      }
+
+      // Zone 3: Resize handle indicator (bottom-right triangle)
+      ctx.fillStyle = this.theme.text.muted + '60';
+      ctx.beginPath();
+      ctx.moveTo(x + w, y + h);
+      ctx.lineTo(x + w - handleSize, y + h);
+      ctx.lineTo(x + w, y + h - handleSize);
+      ctx.closePath();
+      ctx.fill();
     }
     // Prompt node - inline text input
     else if (node.type === 'prompt') {
@@ -2970,7 +3265,16 @@ const Patcher = {
   // Save/Load
   save: function() {
     return {
-      nodes: this.nodes.map(n => ({ id: n.id, type: n.type, x: n.x, y: n.y, params: n.params })),
+      nodes: this.nodes.map(n => {
+        const data = { id: n.id, type: n.type, x: n.x, y: n.y, params: n.params };
+        // Persist gen node metadata
+        if (n.type === 'gen') {
+          if (n._userWidth) data._userWidth = n._userWidth;
+          if (n._userHeight) data._userHeight = n._userHeight;
+          if (n._parameterMeta) data._parameterMeta = n._parameterMeta;
+        }
+        return data;
+      }),
       cables: [...this.cables]
     };
   },
@@ -2981,6 +3285,29 @@ const Patcher = {
       const node = this.addNode(nodeData.type, nodeData.x, nodeData.y);
       if (node && nodeData.params) {
         Object.assign(node.params, nodeData.params);
+      }
+      // Restore gen node metadata
+      if (node && nodeData.type === 'gen') {
+        if (nodeData._userWidth) node._userWidth = nodeData._userWidth;
+        if (nodeData._userHeight) node._userHeight = nodeData._userHeight;
+        if (nodeData._parameterMeta) {
+          node._parameterMeta = nodeData._parameterMeta;
+          // Rebuild inputs from parameter meta
+          node.inputs = ['prompt'];
+          for (const pm of nodeData._parameterMeta) {
+            const paramName = pm.name || pm;
+            node.inputs.push(paramName);
+          }
+          // Sync to AudioEngine
+          const audioNode = AudioEngine.nodes[node.id];
+          if (audioNode) {
+            audioNode._parameterMeta = nodeData._parameterMeta;
+          }
+        }
+        // Re-execute gen canvas if code exists
+        if (node.params.code) {
+          AudioEngine.executeGenCanvas(node.id, node, node.params.code);
+        }
       }
     }
     for (const cable of patch.cables || []) {

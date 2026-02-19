@@ -205,15 +205,6 @@ const AudioEngine = {
       },
       hasInlineInput: true  // Text is editable directly on node
     },
-    parameters: {
-      name: 'Parameters',
-      category: 'generation',
-      inputs: [],  // Dynamically: one input per parameter for modulator connections
-      outputs: [],  // Dynamically: one output per parameter to connect to gen
-      params: {},   // Dynamically: sliders for each extracted parameter
-      isDynamic: true  // Flag indicating this node's ports/params are runtime-generated
-    },
-
     // ============ VISUALS ============
     aiCanvas: {
       name: 'AI Canvas',
@@ -1579,8 +1570,28 @@ const AudioEngine = {
       if (isAICanvas && targetNode.aiParameters) {
         const aiParam = targetNode.aiParameters.find(p => p.name === input);
         if (aiParam) {
-          targetNode.params[input] = isFromRange ? value :
+          let mapped = isFromRange ? value :
             aiParam.min + value * (aiParam.max - aiParam.min);
+          // Round discrete/integer parameters
+          if (aiParam.step && aiParam.step >= 1) {
+            mapped = Math.round(mapped / aiParam.step) * aiParam.step;
+          }
+          targetNode.params[input] = mapped;
+        }
+        continue;
+      }
+
+      // Handle Gen node parameters (inline parameters)
+      if (targetNode.type === 'gen' && targetNode._parameterMeta) {
+        const paramMeta = targetNode._parameterMeta.find(p => p.name === input);
+        if (paramMeta) {
+          let mapped = isFromRange ? value :
+            paramMeta.min + value * (paramMeta.max - paramMeta.min);
+          // Round discrete/integer parameters
+          if (paramMeta.step && paramMeta.step >= 1) {
+            mapped = Math.round(mapped / paramMeta.step) * paramMeta.step;
+          }
+          targetNode.params[input] = mapped;
         }
         continue;
       }
@@ -1761,11 +1772,12 @@ const AudioEngine = {
         if (result.parameters && result.parameters.length > 0) {
           params = result.parameters.map(p => ({
             name: p.name,
-            displayName: p.name,
+            displayName: p.displayName || p.name,
             type: 'number',
             default: p.default || 0.5,
             min: p.min || 0,
-            max: p.max || 1
+            max: p.max || 1,
+            step: p.step !== undefined ? p.step : 0
           }));
         } else {
           // Fallback to extraction if no params in response
@@ -2062,6 +2074,9 @@ const AudioEngine = {
     const node = this.nodes[nodeId];
     if (!node || !node.aiCode) return null;
 
+    // Pause all other running p5 instances
+    this.pauseOtherGenCanvases(nodeId);
+
     // Clean up existing instance
     if (this.aiCanvasInstances[nodeId]) {
       this.aiCanvasInstances[nodeId].remove();
@@ -2118,14 +2133,47 @@ const AudioEngine = {
     }
   },
 
+  // Pause all Gen canvas instances except the given one
+  pauseOtherGenCanvases: function(activeNodeId) {
+    for (const [id, instance] of Object.entries(this.genCanvasInstances)) {
+      if (id !== activeNodeId && instance && typeof instance.noLoop === 'function') {
+        instance.noLoop();
+      }
+    }
+    for (const [id, instance] of Object.entries(this.aiCanvasInstances)) {
+      if (id !== activeNodeId && instance && typeof instance.noLoop === 'function') {
+        instance.noLoop();
+      }
+    }
+  },
+
+  // Resume a specific Gen canvas instance
+  resumeGenCanvas: function(nodeId) {
+    const instance = this.genCanvasInstances[nodeId] || this.aiCanvasInstances[nodeId];
+    if (instance && typeof instance.loop === 'function') {
+      instance.loop();
+    }
+  },
+
   // Execute Gen node code in an offscreen canvas
   executeGenCanvas: function(nodeId, patcherNode, code) {
+    // Pause all other running p5 instances
+    this.pauseOtherGenCanvases(nodeId);
+
     // Clean up existing instance
     this.stopGenCanvas(nodeId);
 
+    // Determine canvas size from patcher node dimensions
+    const patcherDim = (typeof Patcher !== 'undefined' && patcherNode) ?
+      Patcher.getNodeDimensions(patcherNode) : { width: 280, height: 200 };
+    const canvasW = Math.max(200, patcherDim.width - 16);
+    const numParams = (patcherNode?._parameterMeta || []).length;
+    const sliderArea = numParams > 0 ? 20 + numParams * 26 : 0;
+    const canvasH = Math.max(150, patcherDim.height - 48 - sliderArea);
+
     // Create hidden container for p5
     const container = document.createElement('div');
-    container.style.cssText = 'position: absolute; left: -9999px; top: -9999px; width: 200px; height: 150px;';
+    container.style.cssText = `position: absolute; left: -9999px; top: -9999px; width: ${canvasW}px; height: ${canvasH}px;`;
     document.body.appendChild(container);
     this.genCanvasContainers[nodeId] = container;
 
@@ -2161,9 +2209,9 @@ const AudioEngine = {
           if (originalSetup) originalSetup.call(p);
           // Resize to fit our node preview - this works for both 2D and WEBGL
           if (p.canvas) {
-            p.resizeCanvas(200, 150);
+            p.resizeCanvas(canvasW, canvasH);
           } else {
-            p.createCanvas(200, 150);
+            p.createCanvas(canvasW, canvasH);
           }
         };
 
@@ -2179,7 +2227,7 @@ const AudioEngine = {
       } catch (err) {
         console.error('Gen Canvas execution error:', err);
         p.setup = function() {
-          p.createCanvas(200, 150);
+          p.createCanvas(canvasW, canvasH);
           p.background(20);
           p.fill(255, 100, 100);
           p.textAlign(p.CENTER);
