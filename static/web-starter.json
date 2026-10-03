@@ -1,0 +1,46 @@
+{
+  "prompt": "slow breathing concentric rings that swell with alpha",
+  "code": "function(p) {\n  let t = 0;\n  let smoothAlpha = 0.5;\n  const MAX_RINGS = 14;\n  let phases = [];\n  p.setup = function() {\n    p.createCanvas(400, 400);\n    p.colorMode(p.HSB, 360, 100, 100, 100);\n    p.noFill();\n    for (let i = 0; i < MAX_RINGS; i++) {\n      phases.push(i * 0.45);\n    }\n  };\n  p.draw = function() {\n    let alphaLevel = p.getParam('alphaLevel');\n    if (alphaLevel === undefined || alphaLevel === null || isNaN(alphaLevel)) alphaLevel = 0.5;\n    let calmLevel = p.getParam('calmLevel');\n    if (calmLevel === undefined || calmLevel === null || isNaN(calmLevel)) calmLevel = 0.5;\n    let speed = p.getParam('speed') || 0.012;\n    let colorShift = p.getParam('colorShift');\n    if (colorShift === undefined || colorShift === null || isNaN(colorShift)) colorShift = 220;\n    let ringCount = Math.round(p.getParam('ringCount') || 9);\n    ringCount = p.constrain(ringCount, 3, MAX_RINGS);\n\n    smoothAlpha = p.lerp(smoothAlpha, alphaLevel, 0.03);\n    t += speed * (1.2 - calmLevel * 0.6);\n\n    p.background((colorShift + 20) % 360, 35, 8 + smoothAlpha * 4, 22);\n\n    let cx = p.width / 2;\n    let cy = p.height / 2;\n    let maxR = p.min(p.width, p.height) * 0.48;\n    let breath = (p.sin(t) + 1) * 0.5;\n    let swell = 0.75 + smoothAlpha * 0.35 + breath * (0.08 + smoothAlpha * 0.17);\n\n    for (let i = ringCount - 1; i >= 0; i--) {\n      let ratio = (i + 1) / ringCount;\n      let localBreath = p.sin(t - phases[i] * (1 - calmLevel * 0.5));\n      let r = maxR * ratio * swell * (1 + localBreath * 0.04 * (0.5 + smoothAlpha));\n      let hue = (colorShift + ratio * 50 + breath * 15 + 360) % 360;\n      let sat = 35 + (1 - calmLevel) * 25 - smoothAlpha * 10;\n      let bri = 70 + smoothAlpha * 25;\n      let a = (25 + smoothAlpha * 45) * (1.1 - ratio * 0.6);\n\n      p.stroke(hue, sat, bri, a * 0.25);\n      p.strokeWeight(8 + smoothAlpha * 10 + calmLevel * 4);\n      p.ellipse(cx, cy, r * 2, r * 2);\n\n      p.stroke(hue, sat * 0.8, p.min(100, bri + 5), a);\n      p.strokeWeight(1.2 + smoothAlpha * 1.5);\n      p.ellipse(cx, cy, r * 2, r * 2);\n    }\n\n    p.noStroke();\n    let coreR = maxR * (0.12 + breath * 0.06 + smoothAlpha * 0.08);\n    for (let k = 4; k > 0; k--) {\n      p.fill((colorShift + 10) % 360, 30, 95, (8 + smoothAlpha * 10) / k * 2);\n      p.ellipse(cx, cy, coreR * k * 0.8, coreR * k * 0.8);\n    }\n    p.noFill();\n  };\n}",
+  "parameters": [
+    {
+      "name": "alphaLevel",
+      "displayName": "Alpha Level",
+      "type": "number",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0
+    },
+    {
+      "name": "calmLevel",
+      "displayName": "Calm Level",
+      "type": "number",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0
+    },
+    {
+      "name": "speed",
+      "displayName": "Breathing Speed",
+      "type": "number",
+      "default": 0.012,
+      "min": 0.003,
+      "max": 0.04,
+      "step": 0
+    },
+    {
+      "name": "colorShift",
+      "displayName": "Color Shift",
+      "type": "number",
+      "default": 220,
+      "min": 0,
+      "max": 360,
+      "step": 0
+    }
+  ],
+  "modulate": {
+    "band": "alpha",
+    "parameter": "alphaLevel"
+  }
+}

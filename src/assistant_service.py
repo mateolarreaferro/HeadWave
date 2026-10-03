@@ -5,6 +5,7 @@ import hashlib
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
+from types import SimpleNamespace
 import time
 
 # Import semantic taxonomy for prompt enhancement
@@ -49,6 +50,42 @@ class SketchCache:
     def clear(self) -> None:
         """Clear all cached entries."""
         self._cache.clear()
+
+
+class ClaudeClient:
+    """Claude behind the chat-completions shape the methods below already use.
+
+    Every call site passes messages with a leading system message and reads
+    choices[0].message.content, so this keeps that shape and nothing else has
+    to know which provider answered. The model name and temperature the call
+    sites pass belong to Groq and are ignored: Claude picks its own sampling.
+    Override the model with HEADWAVE_MODEL.
+    """
+
+    def __init__(self):
+        import anthropic
+        self._client = anthropic.Anthropic()
+        self._model = os.getenv("HEADWAVE_MODEL", "claude-opus-5-5")
+        self.chat = SimpleNamespace(completions=self)
+
+    def create(self, messages, **_):
+        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        response = self._client.beta.messages.create(
+            model=self._model,
+            # If a safety classifier declines, the API retries on another model.
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            # Thinking shares this budget, so it is well above the answer's size.
+            max_tokens=16000,
+            # A sketch should come back in seconds; this is not a hard problem.
+            output_config={"effort": "low"},
+            system=system,
+            messages=[m for m in messages if m["role"] != "system"],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("The model declined this request.")
+        text = "".join(block.text for block in response.content if block.type == "text")
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
 
 
 class AssistantService:
@@ -141,6 +178,14 @@ Be concise and always format patches as valid JSON."""
         self._init_client()
 
     def _init_client(self):
+        # Claude when an Anthropic key is set, otherwise Groq as before.
+        if os.getenv("ANTHROPIC_API_KEY"):
+            try:
+                self.client = ClaudeClient()
+                self.available = True
+                return
+            except ImportError:
+                pass
         try:
             from groq import Groq
             api_key = os.getenv("GROQ_API_KEY")
@@ -154,7 +199,7 @@ Be concise and always format patches as valid JSON."""
         return self.available and self.client is not None
 
     def get_api_key_error(self) -> str:
-        return "Groq API key not found. Please set GROQ_API_KEY environment variable.\n\nGet your free API key at: https://console.groq.com"
+        return "No API key found. Set ANTHROPIC_API_KEY (Claude) or GROQ_API_KEY (Groq, free at https://console.groq.com)."
 
     def chat(self, message: str) -> Dict[str, Any]:
         if not message:
